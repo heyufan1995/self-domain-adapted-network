@@ -44,30 +44,49 @@ class SynANet(AdaptorNet):
     def __init__(self, opt):
          super(SynANet,self).__init__(opt)
     def def_ANet(self):
-        self.ANet = nn.Sequential(
-            nn.Conv2d(1,64,1),
-            nn.ReLU(),
-            nn.InstanceNorm2d(64),
-            nn.Conv2d(64,128,1),
-            nn.ReLU(),
-            nn.InstanceNorm2d(128),
-            nn.Conv2d(128,64,1),
-            nn.ReLU(),
-            nn.InstanceNorm2d(64),
-            nn.Conv2d(64,1,1)
-        )   
+        self.ANet = ANet(dilations=[1,1,1,1])  
+        # self.ANet = nn.Sequential(
+        #     nn.Conv2d(1,64,1),
+        #     nn.ReLU(),
+        #     nn.InstanceNorm2d(64),
+        #     nn.Conv2d(64,128,1),
+        #     nn.ReLU(),
+        #     nn.InstanceNorm2d(128),
+        #     nn.Conv2d(128,64,1),
+        #     nn.ReLU(),
+        #     nn.InstanceNorm2d(64),
+        #     nn.Conv2d(64,1,1)
+        # )   
     def def_TNet(self):
         """Define Task Net for synthesis, segmentation e.t.c.
         """
         self.TNet = UNet(1,[64,64,64,64],1,isn=True)
+    def opt_AENet(self):
+        """Optimize Auto-Encoder seperately
+        """
+        self.set_requires_grad(self.TNet,False)
+        self.set_requires_grad(self.AENet,True)
+        self.TNet.eval()
+        for subnets in self.AENet:
+            subnets.train()
+        side_out = list(map(self.TNet(self.image,side_out=True).__getitem__, self.AENetMatch))     
+        ae_out = [self.AENet[_](side_out[_]) for _ in range(len(self.AENet))]
+        self.optimizer_AENet.zero_grad()
+        loss = 0
+        weights = self.opt.__dict__.get('weights', [1]*len(ae_out))
+        for _ in range(len(ae_out)):
+            loss += weights[_]*self.AELoss(ae_out[_], side_out[_]) 
+        loss.backward()
+        self.optimizer_AENet.step()
+        return loss.data.item()        
     def def_AENet(self):
         """Define Auto-Encoder for training on source images
         """
         # exp3
-        self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False),
-                      UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(1,[32,16,8],1,isn=True,skip=False)]        
+        # self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False),
+        #               UNet(64,[32,16,8],64,isn=True,skip=False),
+        #               UNet(64,[32,16,8],64,isn=True,skip=False),
+        #               UNet(1,[32,16,8],1,isn=True,skip=False)]        
         # exp 6
         # self.AENet = [UNet(1,[16,8],1,isn=True,skip=False,
         #               bottleneck=bottleneck(channel=8)),
@@ -79,8 +98,13 @@ class SynANet(AdaptorNet):
         # self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False),
         #               UNet(64,[32,16,8],64,isn=True,skip=False),
         #               UNet(64,[32,16,8],64,isn=True,skip=False),
-        #               UNet(1,[32,16,8],1,isn=True,skip=False)]             
-        # self.AENetMatch = [0,1,-2,-1]
+        #               UNet(1,[32,16,8],1,isn=True,skip=False)]     
+        # exp 8
+        self.AENet = [UNet(64,[32,16,8],64,isn=True,skip=False),
+                      UNet(64,[32,16,8],64,isn=True,skip=False),
+                      UNet(64,[32,16,8],64,isn=True,skip=False),
+                      UNet(64,[32,16,8],64,isn=True,skip=False)]          
+        self.AENetMatch = [-2,-3,-4,-5]
         assert len(self.AENet) == len(self.AENetMatch)    
     def def_loss(self):
         self.TLoss = nn.MSELoss()

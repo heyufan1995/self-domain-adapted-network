@@ -143,7 +143,7 @@ def main():
         save_path = os.path.join(args.results_dir, args.trainer+'_train_history.csv')
         with open(save_path, "a", newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([epoch+1,loss])   
+            writer.writerow([epoch+1,m_loss])   
         if (epoch+1) % args.save_step == 0 or epoch+1 == args.epochs:
             # loss = validate(model, val_loader, args, epoch, logger)
             model.save_nets(epoch)

@@ -30,7 +30,7 @@ class SegANet(AdaptorNet):
         #     UNet(1,[64,64,64],64,isn=True,skip=True),
         #     nn.Conv2d(64,1,1))
         # best 10/5 epochs 0.83 dice
-        self.ANet = ANet(dilations=[1,4,8,16])  
+        self.ANet = ANet(dilations=[1,1,1,1])  
     def def_TNet(self):
         """Define Task Net for synthesis, segmentation e.t.c.
         """
@@ -38,11 +38,16 @@ class SegANet(AdaptorNet):
     def def_AENet(self):
         """Define Auto-Encoder for training on source images
         """
-        self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False),
+        # self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False),
+        #               UNet(64,[32,16,8],64,isn=True,skip=False),
+        #               UNet(64,[32,16,8],64,isn=True,skip=False),
+        #               UNet(11,[32,16,8],11,isn=True,skip=False)]
+        # self.AENetMatch = [0,1,-2,-1]
+        self.AENet = [UNet(64,[32,16,8],64,isn=True,skip=False),
                       UNet(64,[32,16,8],64,isn=True,skip=False),
                       UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(11,[32,16,8],11,isn=True,skip=False)]
-        self.AENetMatch = [0,1,-2,-1]
+                      UNet(64,[32,16,8],64,isn=True,skip=False)]          
+        self.AENetMatch = [-2,-3,-4,-5]        
         assert len(self.AENet) == len(self.AENetMatch)    
     def def_loss(self):
         self.TLoss = nn.CrossEntropyLoss()
