@@ -133,7 +133,7 @@ class UNet(nn.Module):
                                          self.midplane[i], 
                                          kernel, **kwargs))
         
-    def forward(self,x,side_out=False):
+    def forward(self,x,side_out=False,bot_out=False):
         xh = [x]  
         x = self.inblocks(x)
         xh.append(x)

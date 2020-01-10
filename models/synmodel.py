@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np 
 import pdb
 from models.backends import UNet, ConvBlock, DenseBlock
-from utils.util import ncc
+from utils.util import ncc, grams
 from external.ssim import pytorch_ssim
 from matplotlib import pyplot as plt
 import matplotlib.colors as mcolors
@@ -44,7 +44,7 @@ class SynANet(AdaptorNet):
     def __init__(self, opt):
          super(SynANet,self).__init__(opt)
     def def_ANet(self):
-        self.ANet = ANet(dilations=[1,1,1,1])  
+        self.ANet = ANet(dilations=[1,4,8,16])  
         # self.ANet = nn.Sequential(
         #     nn.Conv2d(1,64,1),
         #     nn.ReLU(),
@@ -57,6 +57,17 @@ class SynANet(AdaptorNet):
         #     nn.InstanceNorm2d(64),
         #     nn.Conv2d(64,1,1)
         # )   
+    def def_LGan(self):
+        """Define latent space discriminator
+        """
+        inplane = 32
+        self.LGan = nn.Sequential(
+            nn.Linear(inplane,inplane//2),
+            nn.LeakyReLU(),
+            nn.Linear(inplane//2,inplane//4),
+            nn.LeakyReLU(),
+            nn.Linear(inplane//4,inplane//8)       
+        )            
     def def_TNet(self):
         """Define Task Net for synthesis, segmentation e.t.c.
         """
@@ -83,10 +94,12 @@ class SynANet(AdaptorNet):
         """Define Auto-Encoder for training on source images
         """
         # exp3
-        # self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False),
-        #               UNet(64,[32,16,8],64,isn=True,skip=False),
-        #               UNet(64,[32,16,8],64,isn=True,skip=False),
-        #               UNet(1,[32,16,8],1,isn=True,skip=False)]        
+        self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False),
+                      UNet(64,[32,16,8],64,isn=True,skip=False),
+                      UNet(64,[32,16,8],64,isn=True,skip=False),
+                      UNet(1,[32,16,8],1,isn=True,skip=False)]   
+        self.AENetMatch = [0,1,-2,-1]    
+        self.botindex = 4
         # exp 6
         # self.AENet = [UNet(1,[16,8],1,isn=True,skip=False,
         #               bottleneck=bottleneck(channel=8)),
@@ -100,16 +113,17 @@ class SynANet(AdaptorNet):
         #               UNet(64,[32,16,8],64,isn=True,skip=False),
         #               UNet(1,[32,16,8],1,isn=True,skip=False)]     
         # exp 8
-        self.AENet = [UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(64,[32,16,8],64,isn=True,skip=False)]          
-        self.AENetMatch = [-2,-3,-4,-5]
+        # self.AENet = [UNet(64,[32,16,8],64,isn=True,skip=False),
+        #               UNet(64,[32,16,8],64,isn=True,skip=False),
+        #               UNet(64,[32,16,8],64,isn=True,skip=False),
+        #               UNet(64,[32,16,8],64,isn=True,skip=False)]          
+        # self.AENetMatch = [-2,-3,-4,-5]
         assert len(self.AENet) == len(self.AENetMatch)    
     def def_loss(self):
         self.TLoss = nn.MSELoss()
         self.AELoss = nn.MSELoss()
         self.ALoss = nn.MSELoss()
+        self.LGanLoss = nn.BCEWithLogitsLoss()
     def test(self):
         self.TNet.eval()
         self.ANet.eval()

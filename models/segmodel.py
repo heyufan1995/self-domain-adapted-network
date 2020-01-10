@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np 
 import pdb
 from models.backends import UNet, ConvBlock, DenseBlock
-from utils.util import ncc
+from utils.util import ncc, grams
 from external.ssim import pytorch_ssim
 from matplotlib import pyplot as plt
 import matplotlib.colors as mcolors
@@ -20,17 +20,12 @@ class ANet(nn.Module):
     def forward(self, x):
         x = self.dense(x)
         x = self.conv3(x)
-        return x
-
+        return x   
 class SegANet(AdaptorNet):
     def __init__(self, opt):
          super(SegANet,self).__init__(opt)
     def def_ANet(self):
-        # self.ANet = nn.Sequential(
-        #     UNet(1,[64,64,64],64,isn=True,skip=True),
-        #     nn.Conv2d(64,1,1))
-        # best 10/5 epochs 0.83 dice
-        self.ANet = ANet(dilations=[1,1,1,1])  
+        self.ANet = ANet(dilations=[1,4,8,16])  
     def def_TNet(self):
         """Define Task Net for synthesis, segmentation e.t.c.
         """
@@ -38,21 +33,35 @@ class SegANet(AdaptorNet):
     def def_AENet(self):
         """Define Auto-Encoder for training on source images
         """
-        # self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False),
-        #               UNet(64,[32,16,8],64,isn=True,skip=False),
-        #               UNet(64,[32,16,8],64,isn=True,skip=False),
-        #               UNet(11,[32,16,8],11,isn=True,skip=False)]
-        # self.AENetMatch = [0,1,-2,-1]
-        self.AENet = [UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(64,[32,16,8],64,isn=True,skip=False),
-                      UNet(64,[32,16,8],64,isn=True,skip=False)]          
-        self.AENetMatch = [-2,-3,-4,-5]        
+        # bottleneck output will be sent to tanh thus cannot 
+        # go through ReLU.
+        self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False,
+                           bottleneck=nn.Conv2d(8,8,1)),
+                      UNet(64,[32,16,8],64,isn=True,skip=False,
+                           bottleneck=nn.Conv2d(8,8,1)),
+                      UNet(64,[32,16,8],64,isn=True,skip=False,
+                           bottleneck=nn.Conv2d(8,8,1)),
+                      UNet(11,[32,16,8],11,isn=True,skip=False,
+                           bottleneck=nn.Conv2d(8,8,1))]
+        self.botindex = 4 # the index of AENet bottleneck output 
+        self.AENetMatch = [0,1,-2,-1] # the index of TNet features
         assert len(self.AENet) == len(self.AENetMatch)    
+    def def_LGan(self):
+        """Define latent space discriminator
+        """
+        inplane = 32
+        self.LGan = nn.Sequential(
+            nn.Linear(inplane,inplane//2),
+            nn.LeakyReLU(),
+            nn.Linear(inplane//2,inplane//4),
+            nn.LeakyReLU(),
+            nn.Linear(inplane//4,inplane//8)       
+        )    
     def def_loss(self):
         self.TLoss = nn.CrossEntropyLoss()
         self.AELoss = nn.MSELoss()
         self.ALoss = nn.MSELoss()   
+        self.LGanLoss = nn.BCEWithLogitsLoss()
     def cal_metric(self, pred, label):
         """Calculate quantitative metric: Dice coefficient
         Args: 

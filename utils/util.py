@@ -3,6 +3,18 @@ import json
 import logging
 import numpy as np
 import torch
+def grams(x):
+    """Return gram matrix for input feature
+    Args:
+        x: feature maps, [batch, channel, rows, cols]
+    Return:
+        grams [batch, channel, channel]
+    """
+    a, b, c, d = x.size() 
+    features = x.view(a * b, c * d) 
+    G = torch.mm(features, features.t())  # compute the gram product
+    return G.div(a * b * c * d)
+
 def load_config(config_path,args):
     assert(os.path.exists(config_path))
     cfg = json.load(open(config_path, 'r'))

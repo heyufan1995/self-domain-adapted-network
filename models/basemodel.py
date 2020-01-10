@@ -20,6 +20,7 @@ class AdaptorNet(nn.Module):
         self.def_TNet()
         self.def_AENet()
         self.def_ANet()
+        self.def_LGan()
         self.def_loss()
         self.set_opt()
     def set_opt(self):
@@ -37,6 +38,10 @@ class AdaptorNet(nn.Module):
         self.ANet.cuda()
         self.optimizer_ANet = torch.optim.Adam(self.ANet.parameters(),
                                                self.opt.alr)
+        # set LGan optimizers
+        self.LGan.cuda()
+        self.optimizer_LGan = torch.optim.Adam(self.LGan.parameters(),
+                                               self.opt.llr)
     def def_TNet(self):
         """Define Task Net for synthesis, segmentation e.t.c.
         """
@@ -49,12 +54,17 @@ class AdaptorNet(nn.Module):
         """Define Adaptor Net for domain adapt
         """
         pass
+    def def_LGan(self):
+        """Define latent space discriminator
+        """
+        pass
     def def_loss(self):
         """Define training loss
         examples:
             self.TLoss = nn.MSELoss()
             self.AELoss = nn.MSELoss()
             self.ALoss = nn.MSELoss()
+            self.LGanLoss = nn.BCEWithLogitsLoss()
         """
         pass
     def set_requires_grad(self, nets, requires_grad=False, cuda=True):
@@ -88,6 +98,68 @@ class AdaptorNet(nn.Module):
         loss.backward()
         self.optimizer_TNet.step()
         return loss.data.item()
+    def opt_ganAENet(self):
+        """Optimize autoencoder with:
+            reconstruction loss (MSE)
+            latent discriminator loss 
+            visualization discriminator loss
+        """
+        self.set_requires_grad([self.TNet,self.LGan],False)  
+        self.set_requires_grad(self.AENet,True)
+        self.TNet.eval()
+        self.LGan.eval()
+        for subnets in self.AENet:
+            subnets.train()
+        side_out = list(map(self.TNet(self.image,side_out=True).__getitem__, self.AENetMatch))     
+        ae_out = [self.AENet[_](side_out[_],side_out=True) for _ in range(len(self.AENet))]
+        self.optimizer_AENet.zero_grad()      
+        # reconstruction loss
+        rec_loss = 0
+        weights = self.opt.__dict__.get('weights', [1]*len(ae_out))
+        for _ in range(len(ae_out)):
+            rec_loss += weights[_]*self.AELoss(ae_out[_][-1], side_out[_]) 
+        # lgan loss: make the latent space indistinguishable from U[-1,1]
+        # concatenate bottleneck output from AE
+        cat_feat = []
+        for _ in range(len(ae_out)):
+            cat_feat.append(ae_out[_][self.botindex])
+        cat_feat = torch.cat(cat_feat, dim=1)
+        fake_l = F.tanh(F.adaptive_avg_pool2d(cat_feat,1)).squeeze(-1).squeeze(-1)
+        fake_c = self.LGan(fake_l)
+        gan_loss = self.LGanLoss(fake_c,\
+                    torch.FloatTensor(fake_c.data.size()).fill_(1).cuda())
+        loss = gan_loss + rec_loss
+        loss.backward()
+        self.optimizer_AENet.step()
+        return [rec_loss.data.item(), gan_loss.data.item()]
+    def opt_AEganNet(self):
+        """Optimize latent discriminator
+        """        
+        self.set_requires_grad([self.TNet] + self.AENet,False)  
+        self.set_requires_grad(self.LGan,True)
+        self.TNet.eval()
+        for subnets in self.AENet:
+            subnets.eval()
+        self.LGan.train()
+        side_out = list(map(self.TNet(self.image,side_out=True).__getitem__, self.AENetMatch))     
+        ae_out = [self.AENet[_](side_out[_],side_out=True) for _ in range(len(self.AENet))]
+        self.optimizer_LGan.zero_grad()
+        cat_feat = []
+        for _ in range(len(ae_out)):
+            cat_feat.append(ae_out[_][self.botindex])
+        cat_feat = torch.cat(cat_feat, dim=1)
+        fake_l = F.tanh(F.adaptive_avg_pool2d(cat_feat,1)).squeeze(-1).squeeze(-1)
+        fake_c = self.LGan(fake_l)
+        real_l = torch.tensor(np.random.uniform(-1,1,fake_l.data.size()), \
+                              dtype=torch.float32, device=fake_l.device)
+        real_c = self.LGan(real_l)
+        loss = self.LGanLoss(fake_c,\
+                    torch.FloatTensor(fake_c.data.size()).fill_(0).cuda()) \
+             + self.LGanLoss(real_c,\
+                    torch.FloatTensor(real_c.data.size()).fill_(1).cuda())
+        loss.backward()
+        self.optimizer_LGan.step()
+        return loss.data.item()       
     def opt_AENet(self):
         """Optimize Auto-Encoder seperately
         """
@@ -202,7 +274,13 @@ class AdaptorNet(nn.Module):
             save_dicts['state_dict'] = [_.cpu().state_dict() for _ in self.AENet]
             save_dicts['optimizer'] = self.optimizer_AENet.state_dict()
         torch.save(save_dicts, save_path)        
-
+        # save LGan
+        if self.opt.lgan and self.opt.trainer != 'tnet':         
+            save_path = os.path.join(self.opt.results_dir, 'checkpoints', 
+                                     'lcgan' + '_checkpoint_e%d.pth' % (epoch + 1))               
+            save_dicts['state_dict'] = self.LGan.cpu().state_dict()
+            save_dicts['optimizer'] = self.optimizer_LGan.state_dict()  
+            torch.save(save_dicts, save_path)            
     def load_nets(self, checkpoint, name='tnet'):
         """Load network weights
         """
@@ -218,6 +296,10 @@ class AdaptorNet(nn.Module):
                 self.AENet[_].load_state_dict(state_dict[_])
             self.optimizer_AENet.load_state_dict(optimizer)
             logger.info('AENet weights loaded')
+        elif name is 'lgan':
+            self.LGan.load_state_dict(state_dict)  
+            self.optimizer_LGan.load_state_dict(optimizer)
+            logger.info('LGan weights loaded')            
         else:
             raise TypeError('Unknown model name')
 

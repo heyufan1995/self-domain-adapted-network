@@ -40,11 +40,15 @@ parser.add_argument('--tlr', default=0.001, type=float,
 parser.add_argument('--aelr', default=0.001, type=float,
                     metavar='LR', help='initial learning rate for AENet')
 parser.add_argument('--alr', default=0.001, type=float,
-                    metavar='LR', help='initial learning rate for ANet')                                        
+                    metavar='LR', help='initial learning rate for ANet')  
+parser.add_argument('--llr', default=0.001, type=float,
+                    metavar='LR', help='initial learning rate for LGan')                                                          
 parser.add_argument('--resume_T', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('--resume_AE', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none)')                    
+                    help='path to latest checkpoint (default: none)') 
+parser.add_argument('--resume_LG', default='', type=str, metavar='PATH',
+                    help='path to latest checkpoint (default: none)')                                       
 parser.add_argument('-p','--pretrain', dest='pretrain', action='store_true',
                     help='use the pretrain model and reset optimizer')
 parser.add_argument('--trainer',dest='trainer', default='tnet', 
@@ -80,6 +84,7 @@ parser.add_argument('--ss', dest='save_step', default=5, type=int,
 parser.add_argument('--saveimage','--si', dest='saveimage', action='store_true',
                     help='save image with surfaces and layers')
 parser.add_argument('--dpi', dest='dpi', type=int, default=100, help='dpi of saved image')
+parser.add_argument('--lgan', dest='lgan', action='store_true', help='use gan loss')
 def main():
     args = parser.parse_args()
     args.isTrain = False
@@ -126,27 +131,57 @@ def main():
                                                         np.mean(metric_nadp)))
         return   
     # train
-    for epoch in range(args.start_epoch, args.epochs):
-        m_loss = 0
-        for iters, data in enumerate(train_loader):
-            model.set_input(data)
-            if args.trainer == 'tnet':
-                loss = model.opt_TNet()
-            else:
-                loss = model.opt_AENet()
-            logger.info('[%d/%d][%d/%d] %s Loss: %.5f' % \
-                         (epoch, args.epochs, iters, len(train_loader),
-                          args.trainer, loss))            
-            m_loss += loss/len(train_loader)
-        logger.info('[%d/%d] %s Mean Loss: %.5f' % (epoch, args.epochs, 
-                                                    args.trainer, m_loss))      
-        save_path = os.path.join(args.results_dir, args.trainer+'_train_history.csv')
-        with open(save_path, "a", newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([epoch+1,m_loss])   
-        if (epoch+1) % args.save_step == 0 or epoch+1 == args.epochs:
-            # loss = validate(model, val_loader, args, epoch, logger)
-            model.save_nets(epoch)
+    if args.lgan and args.trainer != 'tnet':
+        '''Train autoencoder with latent gan
+           OCGAN: One-class Novelty Detection
+        '''
+        for epoch in range(args.start_epoch, args.epochs):
+            m_loss_ae, m_loss_gan = 0, 0 
+            for iters, data in enumerate(train_loader):
+                # train encoder and decoder
+                model.set_input(data)
+                loss = model.opt_ganAENet()
+                m_loss_ae += sum(loss)/len(train_loader)
+                logger.info('[%d/%d][%d/%d] %s Loss: %.3f/%.3f' % \
+                            (epoch, args.epochs, iters, len(train_loader),
+                            'mse/lgan', loss[0], loss[1]))             
+                # train latent gan
+                loss = model.opt_AEganNet()
+                m_loss_gan += loss/len(train_loader) 
+                logger.info('[%d/%d][%d/%d] %s Loss: %.3f' % \
+                            (epoch, args.epochs, iters, len(train_loader),
+                            'lgan', loss)) 
+            logger.info('[%d/%d] %s Mean ae/gan Loss: %.3f/%.3f' % (epoch, args.epochs, 
+                                                        args.trainer, m_loss_ae, m_loss_gan))      
+            save_path = os.path.join(args.results_dir, args.trainer+'_train_history.csv')
+            with open(save_path, "a", newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([epoch+1,m_loss_ae,m_loss_gan])   
+            if (epoch+1) % args.save_step == 0 or epoch+1 == args.epochs:
+                # loss = validate(model, val_loader, args, epoch, logger)
+                model.save_nets(epoch)
+    else:
+        for epoch in range(args.start_epoch, args.epochs):
+            m_loss = 0
+            for iters, data in enumerate(train_loader):
+                model.set_input(data)
+                if args.trainer == 'tnet':
+                    loss = model.opt_TNet()
+                else:
+                    loss = model.opt_AENet()
+                logger.info('[%d/%d][%d/%d] %s Loss: %.5f' % \
+                            (epoch, args.epochs, iters, len(train_loader),
+                            args.trainer, loss))            
+                m_loss += loss/len(train_loader)
+            logger.info('[%d/%d] %s Mean Loss: %.5f' % (epoch, args.epochs, 
+                                                        args.trainer, m_loss))      
+            save_path = os.path.join(args.results_dir, args.trainer+'_train_history.csv')
+            with open(save_path, "a", newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([epoch+1,m_loss])   
+            if (epoch+1) % args.save_step == 0 or epoch+1 == args.epochs:
+                # loss = validate(model, val_loader, args, epoch, logger)
+                model.save_nets(epoch)
 
 def validate(model, val_loader, args, epoch, logger):
     m_loss = 0
