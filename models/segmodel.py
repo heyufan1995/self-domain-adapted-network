@@ -12,51 +12,14 @@ import matplotlib.colors as mcolors
 import logging
 logger = logging.getLogger('global')
 from models.basemodel import tonp, AdaptorNet
-class ANet(nn.Module):
-    def __init__(self, ndf=64, dilations=[1,1,1,1]):
-        super(ANet, self).__init__()
-        self.dense = DenseBlock(1,ndf,4,dilations=dilations)
-        self.conv3 = nn.Conv2d(4*ndf+1,1,kernel_size=1)
-    def forward(self, x):
-        x = self.dense(x)
-        x = self.conv3(x)
-        return x   
+ 
 class SegANet(AdaptorNet):
     def __init__(self, opt):
          super(SegANet,self).__init__(opt)
-    def def_ANet(self):
-        self.ANet = ANet(dilations=[1,4,8,16])  
     def def_TNet(self):
         """Define Task Net for synthesis, segmentation e.t.c.
         """
-        self.TNet = UNet(1,[64,64,64,64],11,isn=False)
-    def def_AENet(self):
-        """Define Auto-Encoder for training on source images
-        """
-        # bottleneck output will be sent to tanh thus cannot 
-        # go through ReLU.
-        self.AENet = [UNet(1,[32,16,8],1,isn=True,skip=False,
-                           bottleneck=nn.Conv2d(8,8,1)),
-                      UNet(64,[32,16,8],64,isn=True,skip=False,
-                           bottleneck=nn.Conv2d(8,8,1)),
-                      UNet(64,[32,16,8],64,isn=True,skip=False,
-                           bottleneck=nn.Conv2d(8,8,1)),
-                      UNet(11,[32,16,8],11,isn=True,skip=False,
-                           bottleneck=nn.Conv2d(8,8,1))]
-        self.botindex = 4 # the index of AENet bottleneck output 
-        self.AENetMatch = [0,1,-2,-1] # the index of TNet features
-        assert len(self.AENet) == len(self.AENetMatch)    
-    def def_LGan(self):
-        """Define latent space discriminator
-        """
-        inplane = 32
-        self.LGan = nn.Sequential(
-            nn.Linear(inplane,inplane//2),
-            nn.LeakyReLU(),
-            nn.Linear(inplane//2,inplane//4),
-            nn.LeakyReLU(),
-            nn.Linear(inplane//4,inplane//8)       
-        )    
+        self.TNet = UNet(1,[64,64,64,64],11,isn=False)        
     def def_loss(self):
         self.TLoss = nn.CrossEntropyLoss()
         self.AELoss = nn.MSELoss()
@@ -91,15 +54,13 @@ class SegANet(AdaptorNet):
             _dice = np.nanmean(_dice)   
             dice.append(_dice)    
         return dice
-
     def test(self):
         """Test using ANet and TNet
         """
         self.TNet.eval()
         self.ANet.eval()
         with torch.no_grad():
-            adapt_img = self.ANet(self.image)
-            pred = F.softmax(self.TNet(adapt_img), dim=1)
+            pred = F.softmax(self.ANet(self.image, self.TNet), dim=1)
             pred_na = F.softmax(self.TNet(self.image), dim=1)
         batch_size = self.image.shape[0]   
         if self.opt.saveimage:
@@ -108,7 +69,6 @@ class SegANet(AdaptorNet):
                 self.plot(tonp(pred[b_ix]), ids + '_preda.png')
                 self.plot(tonp(pred_na[b_ix]), ids + '_predna.png')
                 self.plot(tonp(self.image[b_ix]), ids + '_image.png')
-                self.plot(tonp(adapt_img[b_ix]), ids + '_adapt.png') 
         metric = [[0]*batch_size,[0]*batch_size]            
         if self.opt.__dict__.get('cal_metric',True):
             metric[0] = self.cal_metric(pred, self.label.squeeze(1))

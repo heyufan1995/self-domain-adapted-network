@@ -13,6 +13,43 @@ import logging
 logger = logging.getLogger('global')
 def tonp(x):
     return x.squeeze().data.cpu().numpy()
+
+class ANet(nn.Module):
+    def __init__(self):
+        super(ANet,self).__init__()
+        self.conv = nn.ModuleList()
+        eye = nn.init.eye_(torch.empty(64, 64)).unsqueeze(-1).unsqueeze(-1)
+        for _ in range(6):
+            convs = nn.Conv2d(64,64,1)
+            convs.weight.data = eye
+            self.conv.append(convs)
+    def forward(self, x, TNet, side_out=False):
+        ct = 0
+        xh = [x]  
+        x = TNet.inblocks(x)
+        x = self.conv[ct](x)
+        ct += 1
+        xh.append(x)
+        for i in range(TNet.depth):
+            x = TNet.downblocks[i](x)            
+            if i != TNet.depth - 1:
+                x = self.conv[ct](x)
+                ct += 1            
+            xh.append(x)
+        x = TNet.bottleneck(x)
+        xh.append(x)
+        for i in range(TNet.depth):
+            x = TNet.upblocks[TNet.depth-i-1](x,xh[TNet.depth-i])
+            x = self.conv[ct](x)
+            ct += 1            
+            xh.append(x)
+        x = TNet.outblock(x)
+        xh.append(x)
+        if side_out:
+            return xh
+        else:
+            return x 
+
 class AdaptorNet(nn.Module):
     def __init__(self, opt):
         super(AdaptorNet,self).__init__()
@@ -49,15 +86,25 @@ class AdaptorNet(nn.Module):
     def def_AENet(self):
         """Define Auto-Encoder for training on source images
         """
-        pass
+        self.AENet = [UNet(128,[64,32,16],128,isn=True,skip=False),
+                      UNet(128,[64,32,16],128,isn=True,skip=False),
+                      UNet(128,[64,32,16],128,isn=True,skip=False)]
+        self.AENetMatch = [[1,-2],[2,-3],[3,-4]] # the matching index of TNet features
     def def_ANet(self):
         """Define Adaptor Net for domain adapt
         """
-        pass
+        self.ANet = ANet()
     def def_LGan(self):
         """Define latent space discriminator
         """
-        pass
+        inplane = 32
+        self.LGan = nn.Sequential(
+            nn.Linear(inplane,inplane//2),
+            nn.LeakyReLU(),
+            nn.Linear(inplane//2,inplane//4),
+            nn.LeakyReLU(),
+            nn.Linear(inplane//4,inplane//8)       
+        )    
     def def_loss(self):
         """Define training loss
         examples:
@@ -168,13 +215,17 @@ class AdaptorNet(nn.Module):
         self.TNet.eval()
         for subnets in self.AENet:
             subnets.train()
-        side_out = list(map(self.TNet(self.image,side_out=True).__getitem__, self.AENetMatch))     
-        ae_out = [self.AENet[_](side_out[_]) for _ in range(len(self.AENet))]
+        side_out = self.TNet(self.image,side_out=True)
+        side_out_cat = []
+        ae_out = []
         self.optimizer_AENet.zero_grad()
         loss = 0
-        weights = self.opt.__dict__.get('weights', [1]*len(ae_out))
-        for _ in range(len(ae_out)):
-            loss += weights[_]*self.AELoss(ae_out[_], side_out[_]) 
+        weights = self.opt.__dict__.get('weights', [1]*len(ae_out))        
+        for _ in range(len(self.AENet)):
+            side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
+                                           side_out[self.AENetMatch[_][1]]], dim=1)) 
+            ae_out.append(self.AENet[_](side_out_cat[_]))
+            loss += weights[_]*self.AELoss(ae_out[_], side_out_cat[_])             
         loss.backward()
         self.optimizer_AENet.step()
         return loss.data.item()
@@ -185,28 +236,25 @@ class AdaptorNet(nn.Module):
     def opt_ANet(self,epoch):
         """Optimize Adaptor
         """
+        self.set_requires_grad([self.TNet] + self.AENet, False) 
+        self.set_requires_grad(self.ANet, True)        
         self.TNet.eval()
         for subnets in self.AENet:
             subnets.eval()        
-        self.set_requires_grad([self.TNet] + self.AENet, False) 
-        self.set_requires_grad(self.ANet, True) 
-        self.ANet.train()
-        adapt_img = self.ANet(self.image)
-        side_out = list(map(self.TNet(adapt_img,
-                                      side_out=True).__getitem__, self.AENetMatch))     
-        ae_out = [self.AENet[_](side_out[_]) for _ in range(len(self.AENet))]
+        self.ANet.train() 
+        side_out = self.ANet(self.image, self.TNet, side_out=True)     
+        side_out_cat = []
+        ae_out = []
         self.optimizer_ANet.zero_grad()
         loss = 0
-        weights = self.opt.__dict__.get('weights', [1]*len(ae_out))        
-        if self.opt.task == 'syn':
-            for _ in range(len(ae_out)):
-                loss += weights[_]*self.ALoss(ae_out[_], side_out[_]) 
-        elif self.opt.task == 'seg':
-            if epoch > 10:
-                for _ in range(len(ae_out)):
-                    loss += weights[_]*self.ALoss(ae_out[_], side_out[_]) 
-            else:  
-                loss += nn.MSELoss()(adapt_img, self.image)  
+        weights = self.opt.__dict__.get('weights', [1]*len(ae_out))      
+          
+        # for _ in range(len(self.AENet)):
+        for _ in range(1):
+            side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
+                                           side_out[self.AENetMatch[_][1]]], dim=1)) 
+            ae_out.append(self.AENet[_](side_out_cat[_]))
+            loss += weights[_]*self.ALoss(ae_out[_], side_out_cat[_])     
         loss.backward()
         self.optimizer_ANet.step()
         return loss.data.item()
