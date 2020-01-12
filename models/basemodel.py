@@ -53,7 +53,7 @@ class AENet(nn.Module):
     def __init__(self):
         super(AENet,self).__init__()
         self.unet = UNet(128,[64,32,16],128,isn=True,skip=False)  
-        self.dt = nn.Sequential(nn.Conv2d(16,128,1),
+        self.dt = nn.Sequential(nn.Conv2d(16,128,1,bias=False),
                                 nn.AdaptiveAvgPool2d(1)
                                 )
         # the index of bottleneck output
@@ -246,10 +246,10 @@ class AdaptorNet(nn.Module):
                                            side_out[self.AENetMatch[_][1]]], dim=1)) 
             ae_out.append(self.AENet[_](side_out_cat[_],side_out=True))
             loss += weights[_]*self.AELoss(ae_out[_][-1], side_out_cat[_])
-            # side_loss = nn.MSELoss()(ae_out[_][0],\
-            #                          torch.FloatTensor(ae_out[_][0].data.size()).fill_(1).cuda())
-            # logger.info('Regularizor loss: %.3f',side_loss.data.item())
-            # loss += side_loss                         
+            side_loss = nn.MSELoss()(ae_out[_][0],\
+                                     torch.FloatTensor(ae_out[_][0].data.size()).fill_(1).cuda())
+            logger.info('Regularizor loss: %.3f',side_loss.data.item())
+            loss += side_loss                         
         loss.backward()
         self.optimizer_AENet.step()
         return loss.data.item()
