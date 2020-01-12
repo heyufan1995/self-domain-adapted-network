@@ -22,7 +22,7 @@ class ANet(nn.Module):
         for _ in range(6):
             convs = nn.Conv2d(64,64,1)
             convs.weight.data = eye
-            self.conv.append(convs)
+            self.conv.append(nn.Sequential(convs,nn.PReLU()))
     def forward(self, x, TNet, side_out=False):
         ct = 0
         xh = [x]  
@@ -54,15 +54,14 @@ class AENet(nn.Module):
         super(AENet,self).__init__()
         self.unet = UNet(128,[64,32,16],128,isn=True,skip=False)  
         self.dt = nn.Sequential(nn.Conv2d(16,128,1),
-                                nn.AdaptiveAvgPool2d(1),
-                                nn.Conv2d(128,128,1),
-                                nn.Tanh())
+                                nn.AdaptiveAvgPool2d(1)
+                                )
         # the index of bottleneck output
         self.botindex = 4
     def forward(self,x,side_out=False):
-        side_out = self.unet(x,side_out=True)
-        bot_out = side_out[self.botindex]
-        rec_out = side_out[-1]
+        side_outs = self.unet(x,side_out=True)
+        bot_out = side_outs[self.botindex]
+        rec_out = side_outs[-1]
         # return a 128 1D vector
         dist = self.dt(bot_out).squeeze(-1).squeeze(-1)
         if side_out:
@@ -245,8 +244,12 @@ class AdaptorNet(nn.Module):
         for _ in range(len(self.AENet)):
             side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
                                            side_out[self.AENetMatch[_][1]]], dim=1)) 
-            ae_out.append(self.AENet[_](side_out_cat[_]))
-            loss += weights[_]*self.AELoss(ae_out[_], side_out_cat[_])             
+            ae_out.append(self.AENet[_](side_out_cat[_],side_out=True))
+            loss += weights[_]*self.AELoss(ae_out[_][-1], side_out_cat[_])
+            # side_loss = nn.MSELoss()(ae_out[_][0],\
+            #                          torch.FloatTensor(ae_out[_][0].data.size()).fill_(1).cuda())
+            # logger.info('Regularizor loss: %.3f',side_loss.data.item())
+            # loss += side_loss                         
         loss.backward()
         self.optimizer_AENet.step()
         return loss.data.item()
@@ -273,8 +276,12 @@ class AdaptorNet(nn.Module):
         for _ in range(len(self.AENet)):
             side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
                                            side_out[self.AENetMatch[_][1]]], dim=1)) 
-            ae_out.append(self.AENet[_](side_out_cat[_]))
-            loss += weights[_]*self.ALoss(ae_out[_], side_out_cat[_])     
+            ae_out.append(self.AENet[_](side_out_cat[_],side_out=True))
+            loss += weights[_]*self.ALoss(ae_out[_][-1], side_out_cat[_])  
+            side_loss = nn.MSELoss()(ae_out[_][0],\
+                                     torch.FloatTensor(ae_out[_][0].data.size()).fill_(1).cuda()) 
+            logger.info('Regularizor loss: %.3f',side_loss.data.item())
+            loss += side_loss                                                     
         loss.backward()
         self.optimizer_ANet.step()
         return loss.data.item()
