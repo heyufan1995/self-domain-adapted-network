@@ -18,7 +18,7 @@ class SynANet(AdaptorNet):
     def def_TNet(self):
         """Define Task Net for synthesis, segmentation e.t.c.
         """
-        self.TNet = UNet(1,[64,64,64,64],1,isn=True)        
+        self.TNet = UNet(1,[64,64,64,64],1,isn=False)        
     def def_loss(self):
         self.TLoss = nn.MSELoss()
         self.AELoss = nn.MSELoss()
@@ -34,9 +34,9 @@ class SynANet(AdaptorNet):
             batch_size = self.image.shape[0]       
             for b_ix in range(batch_size):
                 ids = os.path.split(self.filename[b_ix])[-1].split('.')[0]
-                self.plot(tonp(pred[b_ix]), ids + '_preda.png')
-                self.plot(tonp(pred_na[b_ix]), ids + '_predna.png')
-                self.plot(tonp(self.image[b_ix]), ids + '_image.png')
+                self.plot(tonp(pred[b_ix]), ids + '_preda.tif')
+                self.plot(tonp(pred_na[b_ix]), ids + '_predna.tif')
+                self.plot(tonp(self.image[b_ix]), ids + '_image.tif')
         metric = [[0]*batch_size,[0]*batch_size] 
         if self.opt.__dict__.get('cal_metric',False):
             metric[0] = self.cal_metric(pred, self.label.squeeze(1))

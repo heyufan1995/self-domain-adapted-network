@@ -31,7 +31,7 @@ def load_config(config_path,args):
     return cfg
 
 def setlogger(logger,args):
-    if args.evaluate:
+    if args.test or args.evaluate:
         hdlr = logging.FileHandler(os.path.join(args.results_dir,'eval.log'),'w+')
     else:
         if args.resume_T or args.resume_AE:

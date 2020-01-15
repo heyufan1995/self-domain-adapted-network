@@ -113,9 +113,9 @@ def main():
             for iters, data in enumerate(val_loader):                
                 model.set_input(data)
                 loss = model.opt_ANet(epoch)
-                logger.info('[%d/%d][%d/%d] Adaptor Loss: %.5f' % \
-                            (epoch, args.tepochs, iters, len(val_loader), loss))  
-                m_loss += loss/len(val_loader)
+                logger.info('[{}/{}][{}/{}] Adaptor Loss: {}'.format(\
+                            epoch, args.tepochs, iters, len(val_loader), loss))  
+                m_loss += np.mean(loss)/len(val_loader)
             logger.info('[%d/%d] Mean Loss: %.5f' % (epoch, args.tepochs, m_loss))   
         # start testing
         logger.info('starting inference')
@@ -169,10 +169,10 @@ def main():
                     loss = model.opt_TNet()
                 else:
                     loss = model.opt_AENet()
-                logger.info('[%d/%d][%d/%d] %s Loss: %.5f' % \
-                            (epoch, args.epochs, iters, len(train_loader),
-                            args.trainer, loss))            
-                m_loss += loss/len(train_loader)
+                logger.info('[{}/{}][{}/{}] {} Loss: {}'.format(\
+                            epoch, args.epochs, iters, len(train_loader),
+                            args.trainer, loss))                                     
+                m_loss += np.sum(loss)/len(train_loader)
             logger.info('[%d/%d] %s Mean Loss: %.5f' % (epoch, args.epochs, 
                                                         args.trainer, m_loss))      
             save_path = os.path.join(args.results_dir, args.trainer+'_train_history.csv')

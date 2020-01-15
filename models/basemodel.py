@@ -15,32 +15,50 @@ def tonp(x):
     return x.squeeze().data.cpu().numpy()
 
 class ANet(nn.Module):
-    def __init__(self):
+    def __init__(self,channel=64, nums=6):
         super(ANet,self).__init__()
         self.conv = nn.ModuleList()
-        eye = nn.init.eye_(torch.empty(64, 64)).unsqueeze(-1).unsqueeze(-1)
-        for _ in range(6):
-            convs = nn.Conv2d(64,64,1)
+        self.channel = channel
+        self.nums = nums
+        eye = nn.init.eye_(torch.empty(channel, channel)).unsqueeze(-1).unsqueeze(-1)
+        init_bias = nn.init.zeros_(torch.empty(channel))
+        for _ in range(nums):
+            convs = nn.Conv2d(channel,channel,1)
             convs.weight.data = eye
-            self.conv.append(nn.Sequential(convs,nn.PReLU()))
-    def forward(self, x, TNet, side_out=False):
-        ct = 0
+            convs.bias.data = init_bias
+            self.conv.append(convs)
+    def forward(self, x, TNet, side_out=False, seq=None):
+        """
+        Args: 
+            TNet: nn.Module. The pretrained task network
+            side_out: bool. If true, output every intermediate results
+            seq: list->int or np array. Position of 1x1 convolution
+        """
         xh = [x]  
         x = TNet.inblocks(x)
-        x = self.conv[ct](x)
+        # use all the 1x1 blocks
+        if seq is None:
+            seq = np.arange(self.nums)        
+        ct = 0
+        # apply 1x1 conv on input blocks
+        if ct in seq:
+            x = self.conv[ct](x)
         ct += 1
         xh.append(x)
         for i in range(TNet.depth):
-            x = TNet.downblocks[i](x)            
+            x = TNet.downblocks[i](x)    
+            # apply 1x1 conv on every downsample output except bottleneck       
             if i != TNet.depth - 1:
-                x = self.conv[ct](x)
+                if ct in seq:
+                    x = self.conv[ct](x)
                 ct += 1            
             xh.append(x)
         x = TNet.bottleneck(x)
         xh.append(x)
         for i in range(TNet.depth):
             x = TNet.upblocks[TNet.depth-i-1](x,xh[TNet.depth-i])
-            x = self.conv[ct](x)
+            if ct in seq:
+                x = self.conv[ct](x)
             ct += 1            
             xh.append(x)
         x = TNet.outblock(x)
@@ -50,26 +68,39 @@ class ANet(nn.Module):
         else:
             return x 
 class AENet(nn.Module):
-    def __init__(self):
+    def __init__(self, channel=128, midplane=[], nums=3, isn=True):
         super(AENet,self).__init__()
-        self.unet = UNet(128,[64,32,16],128,isn=True,skip=False)  
-        self.dt = nn.Sequential(nn.Conv2d(16,128,1,bias=False),
+        if not midplane:
+            for _ in range(1,nums+1):
+                midplane.append(channel//(2**_))
+            botchannel = channel//2**nums
+        else:
+            botchannel = midplane[-1]
+            nums = len(midplane)
+        self.unet = UNet(channel,midplane,channel,isn=isn,skip=False)  
+        # the bottleneck transformer is used for bottleneck regularization
+        # which is not used for unstable/useless Gan/Fixed vector regularization.
+        self.dt = nn.Sequential(nn.Conv2d(botchannel,channel,1,bias=False),
                                 nn.AdaptiveAvgPool2d(1)
                                 )
         # the index of bottleneck output
-        self.botindex = 4
+        self.botindex = nums+1
     def forward(self,x,side_out=False):
-        side_outs = self.unet(x,side_out=True)
-        bot_out = side_outs[self.botindex]
+        side_outs = self.unet(x,side_out=True)      
         rec_out = side_outs[-1]
-        # return a 128 1D vector
-        dist = self.dt(bot_out).squeeze(-1).squeeze(-1)
         if side_out:
+            # return a 128 1D vector
+            bot_out = side_outs[self.botindex]
+            dist = self.dt(bot_out).squeeze(-1).squeeze(-1)            
+            dist = self.dt(bot_out).squeeze(-1).squeeze(-1)
+            dist = self.dt(bot_out).squeeze(-1).squeeze(-1)            
             return dist, rec_out            
         else:
             return rec_out
 
 class AdaptorNet(nn.Module):
+    """Base model
+    """
     def __init__(self, opt):
         super(AdaptorNet,self).__init__()
         self.opt = opt
@@ -80,6 +111,8 @@ class AdaptorNet(nn.Module):
         self.def_loss()
         self.set_opt()
     def set_opt(self):
+        """Move models to GPU and set optimizers.
+        """
         # set TNet optimizers
         self.TNet.cuda()
         self.optimizer_TNet = torch.optim.Adam(self.TNet.parameters(), 
@@ -106,8 +139,8 @@ class AdaptorNet(nn.Module):
         """Define Auto-Encoder for training on source images
         """
         # only use the highest-level feature
-        self.AENet = [AENet()]
-        self.AENetMatch = [[1,-2]] # the matching index of TNet features
+        self.AENet = [AENet(),AENet(),AENet(),AENet(channel=1,midplane=[64,32,16])]
+        self.AENetMatch = [[1,-2],[2,-3],[3,-4],[-1]] # the matching index of TNet features
     def def_ANet(self):
         """Define Adaptor Net for domain adapt
         """
@@ -161,7 +194,10 @@ class AdaptorNet(nn.Module):
         self.TNet.train()
         pred = self.TNet.forward(self.image,side_out=False)
         self.optimizer_TNet.zero_grad()
-        loss = self.TLoss(pred, self.label.long())
+        if self.opt.task == 'syn':
+            loss = self.TLoss(pred, self.label.unsqueeze(1))
+        else:
+            loss = self.TLoss(pred, self.label.long())
         loss.backward()
         self.optimizer_TNet.step()
         return loss.data.item()
@@ -240,19 +276,23 @@ class AdaptorNet(nn.Module):
         ae_out = []
         self.optimizer_AENet.zero_grad()
         loss = 0
-        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))        
+        loss_list = []
+        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))                
         for _ in range(len(self.AENet)):
-            side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
-                                           side_out[self.AENetMatch[_][1]]], dim=1)) 
-            ae_out.append(self.AENet[_](side_out_cat[_],side_out=True))
-            loss += weights[_]*self.AELoss(ae_out[_][-1], side_out_cat[_])
-            side_loss = nn.MSELoss()(ae_out[_][0],\
-                                     torch.FloatTensor(ae_out[_][0].data.size()).fill_(1).cuda())
-            logger.info('Regularizor loss: %.3f',side_loss.data.item())
-            loss += side_loss                         
+            if len(self.AENetMatch[_]) == 2:
+                # concatenate features from the same level
+                side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
+                                               side_out[self.AENetMatch[_][1]]], dim=1))
+            else:
+                # use seperate features
+                side_out_cat.append(side_out[self.AENetMatch[_][0]])                 
+            ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
+            level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
+            loss += level_loss
+            loss_list.append(level_loss.data.item())
         loss.backward()
         self.optimizer_AENet.step()
-        return loss.data.item()
+        return loss_list
     def opt_TAENet(self):
         """Optimize Auto-Encoder and Task Net jointly
         """
@@ -271,20 +311,24 @@ class AdaptorNet(nn.Module):
         ae_out = []
         self.optimizer_ANet.zero_grad()
         loss = 0
-        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))      
-          
+        loss_list = []
+        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))                
         for _ in range(len(self.AENet)):
-            side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
-                                           side_out[self.AENetMatch[_][1]]], dim=1)) 
-            ae_out.append(self.AENet[_](side_out_cat[_],side_out=True))
-            loss += weights[_]*self.ALoss(ae_out[_][-1], side_out_cat[_])  
-            side_loss = nn.MSELoss()(ae_out[_][0],\
-                                     torch.FloatTensor(ae_out[_][0].data.size()).fill_(1).cuda()) 
-            logger.info('Regularizor loss: %.3f',side_loss.data.item())
-            loss += side_loss                                                     
+            """Keep this part the same with opt_AENet"""
+            if len(self.AENetMatch[_]) == 2:
+                # concatenate features from the same level
+                side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
+                                               side_out[self.AENetMatch[_][1]]], dim=1))
+            else:
+                # use seperate features
+                side_out_cat.append(side_out[self.AENetMatch[_][0]])     
+            ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
+            level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
+            loss += level_loss
+            loss_list.append(level_loss.data.item())          
         loss.backward()
         self.optimizer_ANet.step()
-        return loss.data.item()
+        return loss_list
     def plot(self,image,ids):
         """Plot and save image
         Args:
@@ -292,12 +336,18 @@ class AdaptorNet(nn.Module):
                    [img_rows, img_cols] for synthesis
         """
         os.makedirs(os.path.join(self.opt.results_dir,'image'), exist_ok=True)
-        fig, ax = plt.subplots(1, 1)
+        fig = plt.figure()
+        height = float(image.shape[-2])
+        width = float(image.shape[-1])        
+        fig.set_size_inches(width/height, 1, forward=False)
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+        ax.set_axis_off()
+        fig.add_axes(ax)
         if len(image.shape) > 2:
             ax.imshow(np.argmax(image,axis=0))
         else:
             ax.imshow(image,cmap='gray')
-        fig.savefig(os.path.join(self.opt.results_dir,'image',ids),dpi=self.opt.dpi)
+        fig.savefig(os.path.join(self.opt.results_dir,'image',ids),dpi=height)
     def plot_hist(self,image,ids, xlim=[-1.5,3]):
         """Plot joint histogram
         Args:

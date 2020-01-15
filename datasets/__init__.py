@@ -39,7 +39,7 @@ def create_dataset(args):
                               pin_memory=True)
     val_loader = DataLoader(dataset=val_dataset,
                             batch_size=1,
-                            shuffle=False,
+                            shuffle=True,
                             num_workers=args.workers,
                             pin_memory=True)
     return train_loader, val_loader
