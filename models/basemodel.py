@@ -67,8 +67,39 @@ class ANet(nn.Module):
             return xh
         else:
             return x 
+class BotNeck(nn.Module):
+    def __init__(self, channel, f_sz):
+        super(BotNeck,self).__init__()
+        in_feat = channel * f_sz[0] * f_sz[1]
+        self.fc = nn.Sequential(
+            nn.Linear(in_feat, in_feat//8),
+            nn.ReLU(),
+            nn.Linear(in_feat//8, in_feat//8),
+            nn.ReLU(),
+            nn.Linear(in_feat//8, in_feat)
+        )
+    def forward(self,x):
+        b, c, h, w =  x.shape
+        x = self.fc(x.view(b,-1))
+        x = x.view(b,c,h,w)
+        return x
 class AENet(nn.Module):
-    def __init__(self, channel=128, midplane=[], nums=3, isn=True):
+    """Flexible Auto Encoder
+    The bottleneck in default is a convolution and the input size is flexible.W
+    Args:
+        channel: input feature channel
+        midplane: if not defined, will decrease input channel by 2
+        nums: number of maxpooling + 1
+        bottleneck: nn.module, bottlenck of the UNet.
+                    kwargs argument, default is a 1x1 conv
+        isn: bool, use Instance Normalization.
+             kwargs argument, default is False
+        skip: bool, use long skip connection in UNet. 
+              kwargs argument, default is True, but manually set to False here
+        kwargs: other parameters that can be used by backends/UNet
+    """
+    def __init__(self, channel=128, midplane=[],\
+                 nums=3, **kwargs):
         super(AENet,self).__init__()
         if not midplane:
             for _ in range(1,nums+1):
@@ -77,27 +108,19 @@ class AENet(nn.Module):
         else:
             botchannel = midplane[-1]
             nums = len(midplane)
-        self.unet = UNet(channel,midplane,channel,isn=isn,skip=False)  
-        # the bottleneck transformer is used for bottleneck regularization
-        # which is not used for unstable/useless Gan/Fixed vector regularization.
-        self.dt = nn.Sequential(nn.Conv2d(botchannel,channel,1,bias=False),
-                                nn.AdaptiveAvgPool2d(1)
-                                )
-        # the index of bottleneck output
-        self.botindex = nums+1
+        self.nums = nums
+        kwargs.setdefault('skip', False)
+        kwargs.setdefault('isn', True)
+        self.unet = UNet(channel,midplane,channel,**kwargs)  
     def forward(self,x,side_out=False):
         side_outs = self.unet(x,side_out=True)      
         rec_out = side_outs[-1]
         if side_out:
-            # return a 128 1D vector
-            bot_out = side_outs[self.botindex]
-            dist = self.dt(bot_out).squeeze(-1).squeeze(-1)            
-            dist = self.dt(bot_out).squeeze(-1).squeeze(-1)
-            dist = self.dt(bot_out).squeeze(-1).squeeze(-1)            
-            return dist, rec_out            
+            # return the bottleneck encoding for further regularization
+            bot_out = side_outs[self.nums + 1]          
+            return bot_out, rec_out            
         else:
             return rec_out
-
 class AdaptorNet(nn.Module):
     """Base model
     """
@@ -138,8 +161,18 @@ class AdaptorNet(nn.Module):
     def def_AENet(self):
         """Define Auto-Encoder for training on source images
         """
-        # only use the highest-level feature
-        self.AENet = [AENet(),AENet(),AENet(),AENet(channel=1,midplane=[64,32,16])]
+        # only use the highest-level feature 
+        if self.opt.pad_size or self.opt.scale_size:
+            if self.opt.scale_size:
+                sz = self.opt.scale_size        
+            else:
+                sz = self.opt.pad_size
+            # last_AE = AENet(channel=1,midplane=[64,32,16,8,8],\
+            #                 bottleneck=BotNeck(channel=8,\
+            #                            f_sz=[int(sz[0]//2**4),int(sz[1]//2**4)]))
+            last_AE = AENet(channel=1,midplane=[64,32,16,8],down_stride=2)
+        self.AENet = [AENet(down_stride=2),AENet(down_stride=2),AENet(down_stride=2),last_AE]
+                      
         self.AENetMatch = [[1,-2],[2,-3],[3,-4],[-1]] # the matching index of TNet features
     def def_ANet(self):
         """Define Adaptor Net for domain adapt
@@ -177,7 +210,34 @@ class AdaptorNet(nn.Module):
                 if cuda:
                     net.cuda()
                 for param in net.parameters():
-                    param.requires_grad = requires_grad    
+                    param.requires_grad = requires_grad
+    def set_data_pre(self,**kwargs):
+        """Preprocess the input image and labels
+           Supports cropping/padding/scaling
+           Images from different dataset needs to have the same
+           physical resolution and pre-registered to some common
+           space.
+        """    
+        if 'image' not in self.__dict__: return 
+        if self.opt.pad_size:
+            h_n, w_n = self.opt.pad_size
+            h,w = self.image.shape[-2:]
+            # crop in the middel
+            if h > h_n:
+                self.image = self.image[:,:,(h-h_n//2):(h-h_n//2)+h_n, :]
+                self.label = self.label[:,(h-h_n//2):(h-h_n//2)+h_n, :]
+            if w > w_n:
+                self.image = self.image[:,:,:,(w-w_n//2):(w-w_n//2)+w_n]
+                self.label = self.label[:,:,(w-w_n//2):(w-w_n//2)+w_n]
+            h,w = self.image.shape[-2:]
+            # padding 
+            pd = tuple(map(int,[(w_n-w)//2, w_n-w-(w_n-w)//2, (h_n-h)//2, h_n-h-(h_n-h)//2]))
+            self.image = nn.ReplicationPad2d(pd)(self.image)
+            self.label = nn.ReplicationPad2d(pd)(self.label.unsqueeze(1)).squeeze(1)
+        if self.opt.scale_size:
+            upl = nn.Upsample(tuple(map(int,self.opt.scale_size)), mode='bilinear')
+            self.image = upl(self.image)
+            self.label = upl(self.label.unsqueeze(1)).squeeze(1)
     def set_input(self, data):
         """Unpack input data and perform necessary pre-processing steps.
         self.image: [batch, 1, img_rows, img_cols]
@@ -187,6 +247,7 @@ class AdaptorNet(nn.Module):
         self.image = torch.stack(tuple(data['data'])).cuda()
         self.label = torch.stack(tuple(data['label'])).cuda()
         self.filename = data['filename']    
+        self.set_data_pre()
     def opt_TNet(self):      
         """Optimize Task Net seperately
         """  
@@ -205,64 +266,14 @@ class AdaptorNet(nn.Module):
         """Optimize autoencoder with:
             reconstruction loss (MSE)
             latent discriminator loss 
+        Code removed, git checkout commits before 172ca44
         """
-        self.set_requires_grad([self.TNet,self.LGan],False)  
-        self.set_requires_grad(self.AENet,True)
-        self.TNet.eval()
-        self.LGan.eval()
-        for subnets in self.AENet:
-            subnets.train()
-        side_out = self.TNet(self.image,side_out=True)
-        side_out_cat = []
-        ae_out = []
-        self.optimizer_AENet.zero_grad()      
-        # reconstruction loss
-        rec_loss = 0
-        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))        
-        for _ in range(len(self.AENet)): 
-            side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
-                                           side_out[self.AENetMatch[_][1]]], dim=1))                
-            ae_out.append(self.AENet[_](side_out_cat[_],side_out=True))            
-            rec_loss += weights[_]*self.AELoss(ae_out[_][-1], side_out_cat[_]) 
-        # lgan loss: make the latent space indistinguishable from U[-1,1]
-        # only use one discriminator for the fisrt autoencoder
-        fake_l = ae_out[0][0]
-        fake_c = self.LGan(fake_l)
-        gan_loss = self.LGanLoss(fake_c,\
-                    torch.FloatTensor(fake_c.data.size()).fill_(1).cuda())
-        loss = gan_loss + rec_loss
-        loss.backward()
-        self.optimizer_AENet.step()
-        return [rec_loss.data.item(), gan_loss.data.item()]
+        pass
     def opt_AEganNet(self):
         """Optimize latent discriminator
+        Code removed, git checkout commits before 172ca44
         """        
-        self.set_requires_grad([self.TNet] + self.AENet,False)  
-        self.set_requires_grad(self.LGan,True)
-        self.TNet.eval()
-        self.LGan.train()
-        for subnets in self.AENet:
-            subnets.eval()       
-        side_out = self.TNet(self.image,side_out=True)     
-        side_out_cat = []
-        ae_out = []
-        self.optimizer_LGan.zero_grad()
-        for _ in range(len(self.AENet)): 
-            side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
-                                           side_out[self.AENetMatch[_][1]]], dim=1))                
-            ae_out.append(self.AENet[_](side_out_cat[_],side_out=True))             
-        fake_l = ae_out[0][0]
-        fake_c = self.LGan(fake_l)
-        real_l = torch.tensor(np.random.uniform(-1,1,fake_l.data.size()), \
-                              dtype=torch.float32, device=fake_l.device)
-        real_c = self.LGan(real_l)
-        loss = self.LGanLoss(fake_c,\
-                    torch.FloatTensor(fake_c.data.size()).fill_(0).cuda()) \
-             + self.LGanLoss(real_c,\
-                    torch.FloatTensor(real_c.data.size()).fill_(1).cuda())
-        loss.backward()
-        self.optimizer_LGan.step()
-        return loss.data.item()       
+        pass
     def opt_AENet(self):
         """Optimize Auto-Encoder seperately
         """
@@ -285,7 +296,7 @@ class AdaptorNet(nn.Module):
                                                side_out[self.AENetMatch[_][1]]], dim=1))
             else:
                 # use seperate features
-                side_out_cat.append(side_out[self.AENetMatch[_][0]])                 
+                side_out_cat.append(side_out[self.AENetMatch[_][0]])         
             ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
             level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
             loss += level_loss
@@ -321,7 +332,7 @@ class AdaptorNet(nn.Module):
                                                side_out[self.AENetMatch[_][1]]], dim=1))
             else:
                 # use seperate features
-                side_out_cat.append(side_out[self.AENetMatch[_][0]])     
+                side_out_cat.append(side_out[self.AENetMatch[_][0]])                    
             ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
             level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
             loss += level_loss

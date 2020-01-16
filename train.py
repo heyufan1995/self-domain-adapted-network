@@ -74,7 +74,11 @@ parser.add_argument('--vimg_path', dest='vimg_path', default='',type=str,
 parser.add_argument('--split',dest='split', type=lambda x: list(map(int, x.split(','))),
                     help='the start and end index for validation dataset')
 parser.add_argument('--wt',dest='weights', type=lambda x: list(map(float, x.split(','))),
-                    help='weights in training ae net')                    
+                    help='weights in training ae net') 
+parser.add_argument('--ps',dest='pad_size', type=lambda x: list(map(float, x.split(','))),
+                    help='padding all the input image to this size')     
+parser.add_argument('--scs',dest='scale_size', type=lambda x: list(map(float, x.split(','))),
+                    help='interpolate all the input image to this size')                                                        
 parser.add_argument('--results_dir', dest='results_dir', default='results_dir',
                     help='results dir of output')
 parser.add_argument('--config', dest='config', default='config.json',
@@ -134,32 +138,9 @@ def main():
     if args.lgan and args.trainer != 'tnet':
         '''Train autoencoder with latent gan
            OCGAN: One-class Novelty Detection
+        Code removed, git checkout commits before 172ca44
         '''
-        for epoch in range(args.start_epoch, args.epochs):
-            m_loss_ae, m_loss_gan = 0, 0 
-            for iters, data in enumerate(train_loader):
-                # train encoder and decoder
-                model.set_input(data)
-                loss = model.opt_ganAENet()
-                m_loss_ae += sum(loss)/len(train_loader)
-                logger.info('[%d/%d][%d/%d] %s Loss: %.3f/%.3f' % \
-                            (epoch, args.epochs, iters, len(train_loader),
-                            'mse/lgan', loss[0], loss[1]))             
-                # train latent gan
-                loss = model.opt_AEganNet()
-                m_loss_gan += loss/len(train_loader) 
-                logger.info('[%d/%d][%d/%d] %s Loss: %.3f' % \
-                            (epoch, args.epochs, iters, len(train_loader),
-                            'lgan', loss)) 
-            logger.info('[%d/%d] %s Mean ae/gan Loss: %.3f/%.3f' % (epoch, args.epochs, 
-                                                        args.trainer, m_loss_ae, m_loss_gan))      
-            save_path = os.path.join(args.results_dir, args.trainer+'_train_history.csv')
-            with open(save_path, "a", newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([epoch+1,m_loss_ae,m_loss_gan])   
-            if (epoch+1) % args.save_step == 0 or epoch+1 == args.epochs:
-                # loss = validate(model, val_loader, args, epoch, logger)
-                model.save_nets(epoch)
+        pass
     else:
         for epoch in range(args.start_epoch, args.epochs):
             m_loss = 0
