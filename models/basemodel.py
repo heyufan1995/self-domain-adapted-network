@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np 
 import pdb
 from models.backends import UNet, ConvBlock, DenseBlock
-from utils.util import ncc
+from utils.util import ncc, l2_reg_ortho
 from external.ssim import pytorch_ssim
 from matplotlib import pyplot as plt
 import matplotlib.colors as mcolors
@@ -15,11 +15,36 @@ def tonp(x):
     return x.squeeze().data.cpu().numpy()
 
 class ANet(nn.Module):
-    def __init__(self,channel=64, nums=6):
+    def __init__(self,channel=64, nums=6, adpt=False, adpNet=None, seq=None):
         super(ANet,self).__init__()
         self.conv = nn.ModuleList()
         self.channel = channel
         self.nums = nums
+        self.adpt = adpt
+        self.seq = seq
+        # use pre-contrast manipulation
+        def init_weights(x):
+            if type(x) == nn.Conv2d:
+                nn.init.xavier_uniform_(x.weight.data)
+                nn.init.zeros_(x.bias.data)         
+        if adpt:
+            if adpNet is None:
+                self.adpNet = nn.Sequential(
+                    nn.Conv2d(1,64,1),
+                    nn.ReLU(),
+                    nn.InstanceNorm2d(64),
+                    nn.Conv2d(64,128,1),
+                    nn.ReLU(),
+                    nn.InstanceNorm2d(128),
+                    nn.Conv2d(128,64,1),
+                    nn.ReLU(),
+                    nn.InstanceNorm2d(64),
+                    nn.Conv2d(64,1,1)
+                )   
+                self.adpNet.apply(init_weights)
+            else:
+                self.adpNet = adpNet
+        # use feature affine transform
         eye = nn.init.eye_(torch.empty(channel, channel)).unsqueeze(-1).unsqueeze(-1)
         init_bias = nn.init.zeros_(torch.empty(channel))
         for _ in range(nums):
@@ -27,18 +52,26 @@ class ANet(nn.Module):
             convs.weight.data = eye
             convs.bias.data = init_bias
             self.conv.append(convs)
-    def forward(self, x, TNet, side_out=False, seq=None):
+           
+
+
+
+    def forward(self, x, TNet, side_out=False):
         """
         Args: 
             TNet: nn.Module. The pretrained task network
             side_out: bool. If true, output every intermediate results
             seq: list->int or np array. Position of 1x1 convolution
         """
-        xh = [x]  
+        if self.adpt:
+            x = self.adpNet(x)
+        xh = [x]      
         x = TNet.inblocks(x)
         # use all the 1x1 blocks
-        if seq is None:
-            seq = np.arange(self.nums)        
+        if self.seq is None:
+            seq = np.arange(self.nums)  
+        else:
+            seq = self.seq      
         ct = 0
         # apply 1x1 conv on input blocks
         if ct in seq:
@@ -167,17 +200,24 @@ class AdaptorNet(nn.Module):
                 sz = self.opt.scale_size        
             else:
                 sz = self.opt.pad_size
-            # last_AE = AENet(channel=1,midplane=[64,32,16,8,8],\
-            #                 bottleneck=BotNeck(channel=8,\
-            #                            f_sz=[int(sz[0]//2**4),int(sz[1]//2**4)]))
-            last_AE = AENet(channel=1,midplane=[64,32,16,8],down_stride=2)
-        self.AENet = [AENet(down_stride=2),AENet(down_stride=2),AENet(down_stride=2),last_AE]
-                      
-        self.AENetMatch = [[1,-2],[2,-3],[3,-4],[-1]] # the matching index of TNet features
+        # last_AE = AENet(channel=1,midplane=[64,32,16,8],down_stride=2)
+        # self.AENet = [AENet(down_stride=2),AENet(down_stride=2),AENet(down_stride=2),last_AE]
+        # self.AENetMatch = [[1,-2],[2,-3],[3,-4],[-1]]
+        # self.AENet = [AENet(channel=1,midplane=[32,16,8]),\
+        #               AENet(channel=64,midplane=[32,16,8]),\
+        #               AENet(channel=64,midplane=[32,16,8]),\
+        #               AENet(channel=1,midplane=[32,16,8])]                  
+        # self.AENetMatch = [[0],[1],[-2],[-1]] # the matching index of TNet features
+        self.AENet = [AENet(channel=1,midplane=[32,16,8]),\
+                      AENet(channel=128,midplane=[64,32,16]),\
+                      AENet(channel=128,midplane=[64,32,16]),\
+                      AENet(channel=128,midplane=[64,32,16]),\
+                      AENet(channel=11,midplane=[32,16,8])]                  
+        self.AENetMatch = [[0],[1,-2],[2,-3],[3,-4],[-1]] # the matching index of TNet features        
     def def_ANet(self):
         """Define Adaptor Net for domain adapt
         """
-        self.ANet = ANet()
+        self.ANet = ANet(adpt=True)
     def def_LGan(self):
         """Define latent space discriminator
         """
@@ -317,6 +357,16 @@ class AdaptorNet(nn.Module):
         for subnets in self.AENet:
             subnets.eval()        
         self.ANet.train() 
+        # if epoch < 10:
+        #     self.optimizer_ANet.zero_grad()
+        #     self.ANet.seq=[]
+        #     side_out = self.ANet(self.image, self.TNet, side_out=True)     
+        #     loss = self.ALoss(side_out[0],self.image)
+        #     loss.backward()
+        #     self.optimizer_ANet.step()
+        #     return loss.data.item()
+        # else:
+        #     self.ANet.seq = None
         side_out = self.ANet(self.image, self.TNet, side_out=True)     
         side_out_cat = []
         ae_out = []
@@ -336,7 +386,10 @@ class AdaptorNet(nn.Module):
             ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
             level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
             loss += level_loss
-            loss_list.append(level_loss.data.item())          
+            loss_list.append(level_loss.data.item())       
+        org_loss = l2_reg_ortho(self.ANet.conv)   
+        logger.info('ord loss:{}'.format(org_loss.data.item()))
+        loss += 1*org_loss
         loss.backward()
         self.optimizer_ANet.step()
         return loss_list
