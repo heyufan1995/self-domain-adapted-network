@@ -16,6 +16,14 @@ def tonp(x):
 
 class ANet(nn.Module):
     def __init__(self,channel=64, nums=6, adpt=False, adpNet=None, seq=None):
+        """Adaptor Net
+        Args:
+            channel: int, input feature channel of the affine transform
+            nums: int, number of affine transform matrix
+            adpt: bool, use front adaptor
+            adpNet: nn.Module, user defined front adaptor
+            seq: list->int, index of the affine matrix which will be used 
+        """
         super(ANet,self).__init__()
         self.conv = nn.ModuleList()
         self.channel = channel
@@ -212,12 +220,12 @@ class AdaptorNet(nn.Module):
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
-                      AENet(channel=11,midplane=[32,16,8])]                  
+                      AENet(channel=1,midplane=[32,16,8])]                  
         self.AENetMatch = [[0],[1,-2],[2,-3],[3,-4],[-1]] # the matching index of TNet features        
     def def_ANet(self):
         """Define Adaptor Net for domain adapt
         """
-        self.ANet = ANet(adpt=True)
+        self.ANet = ANet(adpt=False)
     def def_LGan(self):
         """Define latent space discriminator
         """
@@ -278,6 +286,9 @@ class AdaptorNet(nn.Module):
             upl = nn.Upsample(tuple(map(int,self.opt.scale_size)), mode='bilinear')
             self.image = upl(self.image)
             self.label = upl(self.label.unsqueeze(1)).squeeze(1)
+        if self.opt.add_noise:
+            self.image += 0.1*torch.randn(self.image.shape).cuda()
+
     def set_input(self, data):
         """Unpack input data and perform necessary pre-processing steps.
         self.image: [batch, 1, img_rows, img_cols]

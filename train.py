@@ -78,7 +78,9 @@ parser.add_argument('--wt',dest='weights', type=lambda x: list(map(float, x.spli
 parser.add_argument('--ps',dest='pad_size', type=lambda x: list(map(float, x.split(','))),
                     help='padding all the input image to this size')     
 parser.add_argument('--scs',dest='scale_size', type=lambda x: list(map(float, x.split(','))),
-                    help='interpolate all the input image to this size')                                                        
+                    help='interpolate all the input image to this size')       
+parser.add_argument('--an', dest='add_noise', action='store_true',
+                    help = 'add gaussian noise in preprocessing')                                                                     
 parser.add_argument('--results_dir', dest='results_dir', default='results_dir',
                     help='results dir of output')
 parser.add_argument('--config', dest='config', default='config.json',
