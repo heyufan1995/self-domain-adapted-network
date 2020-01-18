@@ -60,12 +60,15 @@ class SegANet(AdaptorNet):
         self.TNet.eval()
         self.ANet.eval()
         with torch.no_grad():
+            pred = self.ANet(self.image, self.TNet, side_out=True)
+            pred, adapt_img = pred[-1], pred[0]
             pred = F.softmax(self.ANet(self.image, self.TNet), dim=1)
             pred_na = F.softmax(self.TNet(self.image), dim=1)
         batch_size = self.image.shape[0]   
         if self.opt.saveimage:
             for b_ix in range(batch_size):
                 ids = os.path.split(self.filename[b_ix])[-1].split('.')[0]
+                self.plot(tonp(adapt_img[b_ix]), ids + '_adapt.png')
                 self.plot(tonp(pred[b_ix]), ids + '_preda.png')
                 self.plot(tonp(pred_na[b_ix]), ids + '_predna.png')
                 self.plot(tonp(self.image[b_ix]), ids + '_image.png')

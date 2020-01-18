@@ -119,7 +119,7 @@ def main():
                 loss = model.opt_ANet(epoch)
                 logger.info('[{}/{}][{}/{}] Adaptor Loss: {}'.format(\
                             epoch, args.tepochs, iters, len(val_loader), loss))  
-                m_loss += np.mean(loss)/len(val_loader)
+                m_loss += np.sum(loss)/len(val_loader)
             logger.info('[%d/%d] Mean Loss: %.5f' % (epoch, args.tepochs, m_loss))   
         # start testing
         logger.info('starting inference')
