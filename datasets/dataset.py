@@ -110,6 +110,8 @@ class SegDataset(PairDataset):
         # limit bds within image range
         bds[bds<0] = 0
         bds[bds>data.shape[0]-1] = data.shape[0] - 1
+        # normalize input to have zero mean unit variance
+        data = (data - np.mean(data))/np.std(data)
         sample = {'data':data, 'label':mask, 'filename':str(self.datalist[idx])}
         return sample
 
