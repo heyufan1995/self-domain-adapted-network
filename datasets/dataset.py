@@ -75,14 +75,14 @@ class PairDataset(ABCDataset):
         # implement _get_data method
         # the label comes from matlab, remenber -1 in boundary points
         if self.file_ext == 'tif':
-            data = tiff.imread(str(self.datalist[idx]))
+            data = tiff.imread(str(self.datalist[idx])).astype(np.float32)
         else:
             data = misc.imread(str(self.datalist[idx]),mode = 'L')
             data = (data/255).astype(np.float32)
         label = data # default is reconstruction
         if len(self.labellist) > 0:
             if self.lab_ext == 'tif':
-                label = tiff.imread(str(self.labellist[idx]))
+                label = tiff.imread(str(self.labellist[idx])).astype(np.float32)
             else:
                 label = misc.imread(str(self.labellist[idx]),mode = 'L')
                 label = (label/255).astype(np.float32)
