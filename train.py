@@ -120,9 +120,9 @@ def main():
                 model.set_input(data)
                 loss = model.opt_ANet(epoch)
                 logger.info('[{}/{}][{}/{}] Adaptor Loss: {}'.format(\
-                            epoch, args.tepochs, iters, len(val_loader), loss))  
+                            epoch+1, args.tepochs, iters, len(val_loader), loss))  
                 m_loss += np.sum(loss)/len(val_loader)
-            logger.info('[%d/%d] Mean Loss: %.5f' % (epoch, args.tepochs, m_loss))   
+            logger.info('[%d/%d] Mean Loss: %.5f' % (epoch+1, args.tepochs, m_loss))   
         # start testing
         logger.info('starting inference')
         metric_adp, metric_nadp = [], []
@@ -153,17 +153,18 @@ def main():
                 else:
                     loss = model.opt_AENet()
                 logger.info('[{}/{}][{}/{}] {} Loss: {}'.format(\
-                            epoch, args.epochs, iters, len(train_loader),
+                            epoch+1, args.epochs, iters, len(train_loader),
                             args.trainer, loss))                                     
                 m_loss += np.sum(loss)/len(train_loader)
-            logger.info('[%d/%d] %s Mean Loss: %.5f' % (epoch, args.epochs, 
+            logger.info('[%d/%d] %s Mean Loss: %.5f' % (epoch+1, args.epochs, 
                                                         args.trainer, m_loss))      
             save_path = os.path.join(args.results_dir, args.trainer+'_train_history.csv')
             with open(save_path, "a", newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([epoch+1,m_loss])   
             if (epoch+1) % args.save_step == 0 or epoch+1 == args.epochs:
-                # loss = validate(model, val_loader, args, epoch, logger)
+                if args.trainer == 'tnet':
+                    loss = validate(model, val_loader, args, epoch, logger)
                 model.save_nets(epoch)
 
 def validate(model, val_loader, args, epoch, logger):
@@ -172,9 +173,9 @@ def validate(model, val_loader, args, epoch, logger):
         model.set_input(data)
         loss = model.eval()  
         logger.info('[%d/%d][%d/%d] Loss: %.5f' % \
-                (epoch, args.epochs, iters, len(val_loader), loss))            
+                (epoch+1, args.epochs, iters, len(val_loader), loss))            
         m_loss += loss/len(val_loader)
-    logger.info('[%d/%d] Mean Loss: %.5f' % (epoch, args.epochs, m_loss))                      
+    logger.info('[%d/%d] Mean Loss: %.5f' % (epoch+1, args.epochs, m_loss))                      
     return m_loss
 
 if __name__ == '__main__':
