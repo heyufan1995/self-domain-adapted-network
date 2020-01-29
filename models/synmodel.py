@@ -6,7 +6,6 @@ import numpy as np
 import pdb
 from models.backends import UNet, ConvBlock, DenseBlock
 from utils.util import ncc, grams
-from external.ssim import pytorch_ssim
 from matplotlib import pyplot as plt
 import matplotlib.colors as mcolors
 import logging
