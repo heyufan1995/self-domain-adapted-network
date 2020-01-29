@@ -37,18 +37,43 @@ class ANet(nn.Module):
                 nn.init.zeros_(x.bias.data)         
         if adpt:
             if adpNet is None:
+                conv1 = nn.Conv2d(1,64,1)
+                conv2 = nn.Conv2d(64,64,1)
+                conv3 = nn.Conv2d(64,64,1)
+                conv4 = nn.Conv2d(64,1,1)
+                # conv1.weight.data = nn.init.ones_(torch.empty(64, 1)).unsqueeze(-1).unsqueeze(-1)
+                # conv1.bias.data = 10*nn.init.ones_(torch.empty(64))   
+                # conv2.weight.data = nn.init.eye_(torch.empty(64, 64)).unsqueeze(-1).unsqueeze(-1)
+                # conv2.bias.data = 10*nn.init.ones_(torch.empty(64))   
+                # conv3.weight.data = nn.init.eye_(torch.empty(64, 64)).unsqueeze(-1).unsqueeze(-1)
+                # conv3.bias.data = 10*nn.init.ones_(torch.empty(64))                             
+                # conv4.weight.data = 1/64*nn.init.ones_(torch.empty(1, 64)).unsqueeze(-1).unsqueeze(-1)              
+                # conv4.bias.data = nn.init.zeros_(torch.empty(1))#.unsqueeze(-1).unsqueeze(-1)              
                 self.adpNet = nn.Sequential(
-                    nn.Conv2d(1,64,1),
+                    conv1,
                     nn.ReLU(),
                     nn.InstanceNorm2d(64),
-                    nn.Conv2d(64,128,1),
-                    nn.ReLU(),
-                    nn.InstanceNorm2d(128),
-                    nn.Conv2d(128,64,1),
+                    conv2,
                     nn.ReLU(),
                     nn.InstanceNorm2d(64),
-                    nn.Conv2d(64,1,1)
-                )   
+                    conv3,
+                    nn.ReLU(),
+                    nn.InstanceNorm2d(64),      
+                    conv4,
+                    nn.InstanceNorm2d(1)                    
+                )
+                # self.adpNet = nn.Sequential(
+                #     nn.Conv2d(1,64,1),
+                #     nn.ReLU(),
+                #     nn.InstanceNorm2d(64),
+                #     nn.Conv2d(64,128,1),
+                #     nn.ReLU(),
+                #     nn.InstanceNorm2d(128),
+                #     nn.Conv2d(128,64,1),
+                #     nn.ReLU(),
+                #     nn.InstanceNorm2d(64),
+                #     nn.Conv2d(64,1,1)
+                # )   
                 self.adpNet.apply(init_weights)
             else:
                 self.adpNet = adpNet
@@ -60,10 +85,6 @@ class ANet(nn.Module):
             convs.weight.data = eye
             convs.bias.data = init_bias
             self.conv.append(convs)
-           
-
-
-
     def forward(self, x, TNet, side_out=False):
         """
         Args: 
@@ -288,7 +309,6 @@ class AdaptorNet(nn.Module):
             self.label = upl(self.label.unsqueeze(1)).squeeze(1)
         if self.opt.add_noise:
             self.image += 0.1*torch.randn(self.image.shape).cuda()
-
     def set_input(self, data):
         """Unpack input data and perform necessary pre-processing steps.
         self.image: [batch, 1, img_rows, img_cols]
@@ -451,14 +471,17 @@ class AdaptorNet(nn.Module):
         self.TNet.eval()
         with torch.no_grad():
             pred = self.TNet.forward(self.image)
-            loss = self.Tloss(pred,self.label)
+            if self.opt.task == 'syn':
+                loss = self.TLoss(pred, self.label.unsqueeze(1))
+            else:
+                loss = self.TLoss(pred, self.label.long())
         if self.opt.saveimage:
             batch_size = self.image.shape[0]       
             for b_ix in range(batch_size):
                 ids = os.path.split(self.filename[b_ix])[-1].split('.')[0]
-                self.plot(pred[b_ix].squeeze().data.cpu().numpy(), ids + '_pred.png')
-                self.plot(self.image[b_ix].squeeze().data.cpu().numpy(), ids + '_image.png')
-                self.plot(self.label[b_ix].squeeze().data.cpu().numpy(), ids + '_label.png')
+                self.plot(tonp(pred[b_ix]), ids + '_pred.png')
+                self.plot(tonp(self.image[b_ix]), ids + '_image.png')
+                self.plot(tonp(self.label[b_ix]), ids + '_label.png')
         return loss
     def save_nets(self, epoch):
         """Save network weights
