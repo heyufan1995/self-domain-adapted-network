@@ -17,6 +17,7 @@ import pdb
 logger = logging.getLogger('global')
 warnings.filterwarnings("ignore")
 from utils.util import generate_mask
+import tifffile as tiff
 class ABCDataset(Dataset):
     """Abstract Basic class for the dataset
     """
@@ -73,12 +74,18 @@ class PairDataset(ABCDataset):
     def _get_data(self,idx):
         # implement _get_data method
         # the label comes from matlab, remenber -1 in boundary points
-        data = misc.imread(str(self.datalist[idx]),mode = 'L')
-        data = (data/255).astype(np.float32)
+        if self.file_ext == 'tif':
+            data = tiff.imread(str(self.datalist[idx]))
+        else:
+            data = misc.imread(str(self.datalist[idx]),mode = 'L')
+            data = (data/255).astype(np.float32)
         label = data # default is reconstruction
         if len(self.labellist) > 0:
-            label = misc.imread(str(self.labellist[idx]),mode = 'L')
-            label = (label/255).astype(np.float32)
+            if self.lab_ext == 'tif':
+                label = tiff.imread(str(self.labellist[idx]))
+            else:
+                label = misc.imread(str(self.labellist[idx]),mode = 'L')
+                label = (label/255).astype(np.float32)
         data = (data - np.mean(data))/np.std(data)
         label = (label - np.mean(label))/np.std(label)
         sample = {'data':data, 'label':label, 'filename':str(self.datalist[idx])}
