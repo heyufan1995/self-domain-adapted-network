@@ -73,6 +73,8 @@ parser.add_argument('--vimg_path', dest='vimg_path', default='',type=str,
                     help='path to the validation image')
 parser.add_argument('--split',dest='split', type=lambda x: list(map(int, x.split(','))),
                     help='the start and end index for validation dataset')
+parser.add_argument('--seq',dest='seq', type=lambda x: list(map(int, x.split(','))),
+                    help='the 1x1 conv seq to be used in A-Net')
 parser.add_argument('--wt',dest='weights', type=lambda x: list(map(float, x.split(','))),
                     help='weights in training ae net') 
 parser.add_argument('--ps',dest='pad_size', type=lambda x: list(map(float, x.split(','))),

@@ -252,18 +252,19 @@ class AdaptorNet(nn.Module):
         #               AENet(channel=64,midplane=[32,16,8]),\
         #               AENet(channel=1,midplane=[32,16,8])]                  
         # self.AENetMatch = [[0],[1],[-2],[-1]] # the matching index of TNet features
-        if self.task == 'syn':out = 1 
+        if self.opt.task == 'syn':out = 1 
         else:out = 11
         self.AENet = [AENet(channel=1,midplane=[32,16,8]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
+                      AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=out,midplane=[32,16,8])]                  
-        self.AENetMatch = [[0],[1,-2],[2,-3],[3,-4],[-1]] # the matching index of TNet features        
+        self.AENetMatch = [[0],[1,-2],[2,-3],[3,-4],[4,-5],[-1]] # the matching index of TNet features        
     def def_ANet(self):
         """Define Adaptor Net for domain adapt
         """
-        self.ANet = ANet(adpt=True,seq=[])
+        self.ANet = ANet(adpt=True,seq=self.opt.seq)
     def def_LGan(self):
         """Define latent space discriminator
         """
