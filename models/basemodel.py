@@ -9,6 +9,8 @@ from utils.util import ncc, l2_reg_ortho
 from matplotlib import pyplot as plt
 import matplotlib.colors as mcolors
 import logging
+import tifffile as tiff
+from functools import partial
 logger = logging.getLogger('global')
 def tonp(x):
     return x.squeeze().data.cpu().numpy()
@@ -34,6 +36,13 @@ class ANet(nn.Module):
             if type(x) == nn.Conv2d:
                 nn.init.xavier_uniform_(x.weight.data)
                 nn.init.zeros_(x.bias.data)         
+        def init_weights_eye(x, channel=64):
+            # indentity init, only works for same input/output channel
+            eye = nn.init.eye_(torch.empty(channel, channel)).unsqueeze(-1).unsqueeze(-1)
+            init_bias = nn.init.zeros_(torch.empty(channel))            
+            if type(x) == nn.Conv2d:
+                x.weight.data = eye
+                x.bias.data = init_bias 
         if adpt:
             if adpNet is None:
                 conv1 = nn.Conv2d(1,64,1)
@@ -74,16 +83,21 @@ class ANet(nn.Module):
                 #     nn.Conv2d(64,1,1)
                 # )   
                 self.adpNet.apply(init_weights)
+                self.adpNet2 = nn.Sequential(
+                    nn.Conv2d(1,1,1),
+                    nn.LeakyReLU(),
+                    nn.Conv2d(1,1,1),
+                    nn.LeakyReLU(),    
+                    nn.Conv2d(1,1,1)     
+                )
+                self.adpNet2.apply(partial(init_weights_eye,channel=1))
             else:
                 self.adpNet = adpNet
         # use feature affine transform
-        eye = nn.init.eye_(torch.empty(channel, channel)).unsqueeze(-1).unsqueeze(-1)
-        init_bias = nn.init.zeros_(torch.empty(channel))
         for _ in range(nums):
             convs = nn.Conv2d(channel,channel,1)
-            convs.weight.data = eye
-            convs.bias.data = init_bias
             self.conv.append(convs)
+        self.conv.apply(init_weights_eye)
     def forward(self, x, TNet, side_out=False):
         """
         Args: 
@@ -121,8 +135,10 @@ class ANet(nn.Module):
             if ct in seq:
                 x = self.conv[ct](x)
             ct += 1            
-            xh.append(x)
+            xh.append(x)        
         x = TNet.outblock(x)
+        # if self.adpt:
+        #     x = self.adpNet2(x)
         xh.append(x)
         if side_out:
             return xh
@@ -236,16 +252,18 @@ class AdaptorNet(nn.Module):
         #               AENet(channel=64,midplane=[32,16,8]),\
         #               AENet(channel=1,midplane=[32,16,8])]                  
         # self.AENetMatch = [[0],[1],[-2],[-1]] # the matching index of TNet features
+        if self.task == 'syn':out = 1 
+        else:out = 11
         self.AENet = [AENet(channel=1,midplane=[32,16,8]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
-                      AENet(channel=1,midplane=[32,16,8])]                  
+                      AENet(channel=out,midplane=[32,16,8])]                  
         self.AENetMatch = [[0],[1,-2],[2,-3],[3,-4],[-1]] # the matching index of TNet features        
     def def_ANet(self):
         """Define Adaptor Net for domain adapt
         """
-        self.ANet = ANet(adpt=False)
+        self.ANet = ANet(adpt=True,seq=[])
     def def_LGan(self):
         """Define latent space discriminator
         """
@@ -387,16 +405,6 @@ class AdaptorNet(nn.Module):
         for subnets in self.AENet:
             subnets.eval()        
         self.ANet.train() 
-        # if epoch < 10:
-        #     self.optimizer_ANet.zero_grad()
-        #     self.ANet.seq=[]
-        #     side_out = self.ANet(self.image, self.TNet, side_out=True)     
-        #     loss = self.ALoss(side_out[0],self.image)
-        #     loss.backward()
-        #     self.optimizer_ANet.step()
-        #     return loss.data.item()
-        # else:
-        #     self.ANet.seq = None
         side_out = self.ANet(self.image, self.TNet, side_out=True)     
         side_out_cat = []
         ae_out = []
@@ -430,18 +438,24 @@ class AdaptorNet(nn.Module):
                    [img_rows, img_cols] for synthesis
         """
         os.makedirs(os.path.join(self.opt.results_dir,'image'), exist_ok=True)
-        fig = plt.figure()
-        height = float(image.shape[-2])
-        width = float(image.shape[-1])        
-        fig.set_size_inches(width/height, 1, forward=False)
-        ax = plt.Axes(fig, [0., 0., 1., 1.])
-        ax.set_axis_off()
-        fig.add_axes(ax)
-        if len(image.shape) > 2:
-            ax.imshow(np.argmax(image,axis=0))
+        ext = ids.split('.')[-1]
+        if ext == 'tif':        
+            if len(image.shape) > 2:
+                image = np.argmax(image,axis=0)
+            tiff.imsave(os.path.join(self.opt.results_dir,'image',ids), image)
         else:
-            ax.imshow(image,cmap='gray')
-        fig.savefig(os.path.join(self.opt.results_dir,'image',ids),dpi=height)
+            fig = plt.figure()
+            height = float(image.shape[-2])
+            width = float(image.shape[-1])        
+            fig.set_size_inches(width/height, 1, forward=False)
+            ax = plt.Axes(fig, [0., 0., 1., 1.])
+            ax.set_axis_off()
+            fig.add_axes(ax)
+            if len(image.shape) > 2:
+                ax.imshow(np.argmax(image,axis=0))
+            else:
+                ax.imshow(image,cmap='gray')
+            fig.savefig(os.path.join(self.opt.results_dir,'image',ids),dpi=height)
     def plot_hist(self,image,ids, xlim=[-1.5,3]):
         """Plot joint histogram
         Args:
