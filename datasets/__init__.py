@@ -1,6 +1,11 @@
 from datasets.dataset import PairDataset,SegDataset
 from datasets.dataset import split_data
 from torch.utils.data import Dataset, DataLoader
+import os
+import pdb
+from copy import deepcopy
+import logging
+logger = logging.getLogger('global')
 def create_dataset(args):
     ''' Create train and val dataset
     '''
@@ -15,12 +20,28 @@ def create_dataset(args):
                                 labelpath=args.label_path,
                                 file_ext=args.img_ext, 
                                 lab_ext=args.label_ext)
-    if args.vimg_path:          
+    if args.vimg_path:   
+        val_dataset_list = []
         val_dataset = dataset(filepath=args.vimg_path, 
                                  labelpath=args.vlabel_path,
                                  file_ext=args.img_ext,
                                  lab_ext=args.label_ext)
-    elif args.split:
+        # return a list of val_dataset, each contains one subject             
+        if args.__dict__.get('sub_name',False):
+            if os.path.isfile(args.sub_name):
+                with open(args.sub_name) as f:
+                    dataname = f.read().splitlines() 
+            datalist = val_dataset.datalist
+            labellist = val_dataset.labellist
+            for name in dataname[:12]:
+                val_dataset.datalist = sorted([_ for _ in datalist if name in str(_)])
+                val_dataset.labellist = sorted([_ for _ in labellist if name in str(_)])
+                val_dataset_list.append(deepcopy(val_dataset))
+        else:
+            val_dataset_list = [val_dataset]
+
+
+    elif args.split and not args.__dict__.get('sub_name',False):
         train_dataset, val_dataset = split_data(dataset=train_dataset,
                                                 split=args.split)
         train_dataset = train_dataset
@@ -37,9 +58,9 @@ def create_dataset(args):
                               shuffle=True,
                               num_workers=args.workers, 
                               pin_memory=True)
-    val_loader = DataLoader(dataset=val_dataset,
+    val_loader = [DataLoader(dataset=_,
                             batch_size=1,
                             shuffle=True,
                             num_workers=args.workers,
-                            pin_memory=True)
+                            pin_memory=True) for _ in val_dataset_list]
     return train_loader, val_loader

@@ -61,13 +61,17 @@ class PairDataset(ABCDataset):
         if filepath is not None:
             if os.path.isfile(filepath):
                 with open(filepath) as f:
-                    self.datalist = f.read().splitlines()    
-            else:            
+                    self.datalist = f.read().splitlines() 
+            elif type(filepath) == list:
+                self.datalist = filepath   
+            elif type(filepath) == str:            
                 self.datalist = sorted(list(Path(self.filepath).glob('*.'+self.file_ext)))
             if os.path.isfile(labelpath):
                 with open(labelpath) as f:
-                    self.labellist = f.read().splitlines()    
-            else:                  
+                    self.labellist = f.read().splitlines() 
+            elif type(labelpath) == list: 
+                self.labellist = labelpath 
+            elif type(labelpath) == str:                   
                 self.labellist = sorted(list(Path(self.labelpath).glob('*.'+self.lab_ext)))
     def __len__(self):
         return len(self.datalist)

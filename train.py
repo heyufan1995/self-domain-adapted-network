@@ -71,6 +71,8 @@ parser.add_argument('--vlabel_path', dest='vlabel_path', default='',type=str,
                     help='path to the validation label')
 parser.add_argument('--vimg_path', dest='vimg_path', default='',type=str,
                     help='path to the validation image')
+parser.add_argument('--sub_name', dest='sub_name', default='',type=str,
+                    help='path to the txt file name containing subject unique ID')                    
 parser.add_argument('--split',dest='split', type=lambda x: list(map(int, x.split(','))),
                     help='the start and end index for validation dataset')
 parser.add_argument('--seq',dest='seq', type=lambda x: list(map(int, x.split(','))),
@@ -82,7 +84,9 @@ parser.add_argument('--ps',dest='pad_size', type=lambda x: list(map(float, x.spl
 parser.add_argument('--scs',dest='scale_size', type=lambda x: list(map(float, x.split(','))),
                     help='interpolate all the input image to this size')       
 parser.add_argument('--an', dest='add_noise', action='store_true',
-                    help = 'add gaussian noise in preprocessing')                                                                     
+                    help = 'add gaussian noise in preprocessing') 
+parser.add_argument('--na', dest='no_adpt', action='store_true',
+                    help = 'not using pre-adaptation')                                                                                          
 parser.add_argument('--results_dir', dest='results_dir', default='results_dir',
                     help='results dir of output')
 parser.add_argument('--config', dest='config', default='config.json',
@@ -100,6 +104,7 @@ def main():
     logger = logging.getLogger('global')
     logger = setlogger(logger,args)
     # build dataset
+    # val_loader is a list of dataloader for a list of test subject
     train_loader, val_loader = create_dataset(args)
     logger.info('build dataset done')
     # build model
@@ -109,32 +114,45 @@ def main():
     # evaluate
     if args.evaluate:
         logger.info('begin evaluation')
-        loss = validate(model, val_loader, args, 0, logger)
+        loss = validate(model, val_loader[0], args, 0, logger)
         return loss
-    # test
     if args.test:
         # put test image in vimg_path 
         logger.info('begin testing')
         # train adaptor
-        for epoch in range(args.tepochs):
-            m_loss = 0
-            for iters, data in enumerate(val_loader):                
-                model.set_input(data)
-                loss = model.opt_ANet(epoch)
-                logger.info('[{}/{}][{}/{}] Adaptor Loss: {}'.format(\
-                            epoch+1, args.tepochs, iters, len(val_loader), loss))  
-                m_loss += np.sum(loss)/len(val_loader)
-            logger.info('[%d/%d] Mean Loss: %.5f' % (epoch+1, args.tepochs, m_loss))   
-        # start testing
-        logger.info('starting inference')
         metric_adp, metric_nadp = [], []
-        for iters, data in enumerate(val_loader):
-            logger.info('[%d/%d]' % (iters, len(val_loader)))
-            model.set_input(data)
-            _metric = model.test()  
-            metric_adp.extend(_metric[0])
-            metric_nadp.extend(_metric[1])
-            logger.info('metric adp/noadp:{}/{}'.format(_metric[0],_metric[1]))
+        for sub in range(len(val_loader)):
+            logger.info('testing subject:{}'.format(sub))
+            model.ANet.reset()
+            prev_loss = np.inf
+            sub_metric_adp, sub_metric_nadp = [], []
+            for epoch in range(args.tepochs):  
+                m_loss = 0                                       
+                for iters, data in enumerate(val_loader[sub]):               
+                    model.set_input(data)
+                    loss = model.opt_ANet(epoch)
+                    logger.info('[{}/{}][{}/{}] Adaptor Loss: {}'.format(\
+                                epoch+1, args.tepochs, iters, len(val_loader[sub]), loss))  
+                    m_loss += np.sum(loss)/len(val_loader[sub])
+                logger.info('[%d/%d] Mean Loss: %.5f' % (epoch+1, args.tepochs, m_loss)) 
+                if 0.95*prev_loss < m_loss: 
+                    break                    
+                else: 
+                    prev_loss = m_loss     
+            # start testing
+            logger.info('starting inference')            
+            for iters, data in enumerate(val_loader[sub]):
+                logger.info('[%d/%d]' % (iters, len(val_loader[sub])))
+                model.set_input(data)
+                _metric = model.test()  
+                metric_adp.extend(_metric[0])
+                metric_nadp.extend(_metric[1])
+                sub_metric_adp.extend(_metric[0])
+                sub_metric_nadp.extend(_metric[1])                
+                logger.info('metric adp/noadp:{}/{}'.format(_metric[0],_metric[1]))
+            logger.info('sub {} mean metric adp/noadp{}/{}'.format(sub, \
+                                                            np.mean(sub_metric_adp),\
+                                                            np.mean(sub_metric_nadp)))                
         logger.info('mean metric adp/noadp{}/{}'.format(np.mean(metric_adp),\
                                                         np.mean(metric_nadp)))
         return   
