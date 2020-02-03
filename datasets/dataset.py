@@ -17,6 +17,7 @@ import pdb
 logger = logging.getLogger('global')
 warnings.filterwarnings("ignore")
 from utils.util import generate_mask
+import tifffile as tiff
 class ABCDataset(Dataset):
     """Abstract Basic class for the dataset
     """
@@ -60,25 +61,35 @@ class PairDataset(ABCDataset):
         if filepath is not None:
             if os.path.isfile(filepath):
                 with open(filepath) as f:
-                    self.datalist = f.read().splitlines()    
-            else:            
+                    self.datalist = f.read().splitlines() 
+            elif type(filepath) == list:
+                self.datalist = filepath   
+            elif type(filepath) == str:            
                 self.datalist = sorted(list(Path(self.filepath).glob('*.'+self.file_ext)))
             if os.path.isfile(labelpath):
                 with open(labelpath) as f:
-                    self.labellist = f.read().splitlines()    
-            else:                  
+                    self.labellist = f.read().splitlines() 
+            elif type(labelpath) == list: 
+                self.labellist = labelpath 
+            elif type(labelpath) == str:                   
                 self.labellist = sorted(list(Path(self.labelpath).glob('*.'+self.lab_ext)))
     def __len__(self):
         return len(self.datalist)
     def _get_data(self,idx):
         # implement _get_data method
         # the label comes from matlab, remenber -1 in boundary points
-        data = misc.imread(str(self.datalist[idx]),mode = 'L')
-        data = (data/255).astype(np.float32)
+        if self.file_ext == 'tif':
+            data = tiff.imread(str(self.datalist[idx])).astype(np.float32)
+        else:
+            data = misc.imread(str(self.datalist[idx]),mode = 'L')
+            data = (data/255).astype(np.float32)
         label = data # default is reconstruction
         if len(self.labellist) > 0:
-            label = misc.imread(str(self.labellist[idx]),mode = 'L')
-            label = (label/255).astype(np.float32)
+            if self.lab_ext == 'tif':
+                label = tiff.imread(str(self.labellist[idx])).astype(np.float32)
+            else:
+                label = misc.imread(str(self.labellist[idx]),mode = 'L')
+                label = (label/255).astype(np.float32)
         data = (data - np.mean(data))/np.std(data)
         label = (label - np.mean(label))/np.std(label)
         sample = {'data':data, 'label':label, 'filename':str(self.datalist[idx])}
@@ -110,6 +121,8 @@ class SegDataset(PairDataset):
         # limit bds within image range
         bds[bds<0] = 0
         bds[bds>data.shape[0]-1] = data.shape[0] - 1
+        # normalize input to have zero mean unit variance
+        data = (data - np.mean(data))/np.std(data)
         sample = {'data':data, 'label':mask, 'filename':str(self.datalist[idx])}
         return sample
 

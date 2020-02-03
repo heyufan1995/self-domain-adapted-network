@@ -39,6 +39,7 @@ class _ResConvBlock(nn.Module):
         gpn = kwargs.get('gpn', False)
         isn = kwargs.get('isn', False)
         reflect = kwargs.get('reflect', False)
+        stride = kwargs.get('stride',1)
         if pad is None:
             pad = (kernel[0]//2, kernel[1]//2)
         # use reflect padding to solve the boundary problem
@@ -46,7 +47,7 @@ class _ResConvBlock(nn.Module):
             self.reflectpad1 = nn.ReflectionPad2d((pad[0], pad[0], pad[1], pad[1]))
             self.reflectpad2 = nn.ReflectionPad2d((2*pad[0], 2*pad[0], 2*pad[1], 2*pad[1]))
             pad = (0, 0)
-        self.conv = nn.Conv2d(inplane, outplane, kernel, padding=pad)
+        self.conv = nn.Conv2d(inplane, outplane, kernel, stride=stride, padding=pad)
         # use group norm instead of batch norm 
         if gpn:
             self.norm = functools.partial(nn.GroupNorm,4) 
@@ -100,10 +101,15 @@ class UpBlock(nn.Module):
 class DownBlock(nn.Module):
     def __init__(self, inplane, outplane, kernel=(3,3), **kwargs):
         super(DownBlock,self).__init__()
-        self.dconv = nn.Sequential(
-            nn.MaxPool2d(2),
-            ConvBlock(inplane, outplane, kernel, **kwargs)
-        )
+        stride = kwargs.get('down_stride',None)
+        if stride:
+            kwargs['stride'] = stride
+            self.dconv = ConvBlock(inplane, outplane, kernel, **kwargs)
+        else:
+            self.dconv = nn.Sequential(
+                nn.MaxPool2d(2),
+                ConvBlock(inplane, outplane, kernel, **kwargs)
+            )
     def forward(self, x):
         x = self.dconv(x)
         return x         
@@ -133,7 +139,7 @@ class UNet(nn.Module):
                                          self.midplane[i], 
                                          kernel, **kwargs))
         
-    def forward(self,x,side_out=False):
+    def forward(self,x,side_out=False,bot_out=False):
         xh = [x]  
         x = self.inblocks(x)
         xh.append(x)
