@@ -33,7 +33,7 @@ def create_dataset(args):
                     dataname = f.read().splitlines() 
             datalist = val_dataset.datalist
             labellist = val_dataset.labellist
-            for name in dataname[:12]:
+            for name in dataname:
                 val_dataset.datalist = sorted([_ for _ in datalist if name in str(_)])
                 val_dataset.labellist = sorted([_ for _ in labellist if name in str(_)])
                 val_dataset_list.append(deepcopy(val_dataset))

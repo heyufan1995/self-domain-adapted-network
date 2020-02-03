@@ -122,7 +122,7 @@ def main():
         # train adaptor
         metric_adp, metric_nadp = [], []
         for sub in range(len(val_loader)):
-            logger.info('testing subject:{}'.format(sub))
+            logger.info('testing subject:{}/{}'.format(sub+1,len(val_loader)))
             model.ANet.reset()
             prev_loss = np.inf
             sub_metric_adp, sub_metric_nadp = [], []
@@ -149,12 +149,26 @@ def main():
                 metric_nadp.extend(_metric[1])
                 sub_metric_adp.extend(_metric[0])
                 sub_metric_nadp.extend(_metric[1])                
-                logger.info('metric adp/noadp:{}/{}'.format(_metric[0],_metric[1]))
-            logger.info('sub {} mean metric adp/noadp{}/{}'.format(sub, \
-                                                            np.mean(sub_metric_adp),\
-                                                            np.mean(sub_metric_nadp)))                
-        logger.info('mean metric adp/noadp{}/{}'.format(np.mean(metric_adp),\
-                                                        np.mean(metric_nadp)))
+                logger.info('metric adp/noadp:\n{}\n{}'\
+                      .format(str(_metric[0]).replace('\n',''),\
+                              str(_metric[1]).replace('\n','')))
+            sub_metric_adp, sub_metric_nadp = np.vstack(sub_metric_adp), np.vstack(sub_metric_nadp)
+            logger.info('sub {} mean metric adp/noadp\n{}\n{}'.format(sub+1, \
+                         str(np.mean(sub_metric_adp,axis=0)).replace('\n',''),\
+                         str(np.mean(sub_metric_nadp,axis=0)).replace('\n','')))   
+        metric_adp, metric_nadp = np.vstack(metric_adp), np.vstack(metric_nadp)
+        logger.info('Overall mean metric adp/noadp:\n{}[{}]\n{}[{}]'.\
+                    format(str(np.mean(metric_adp,axis=0)).replace('\n',''),\
+                           np.mean(metric_adp),\
+                           str(np.mean(metric_nadp,axis=0)).replace('\n',''),\
+                           np.mean(np.vstack(metric_nadp))))
+        # there is a "\n" in numpy array which needs to be removed
+        with open(os.path.join(args.results_dir, args.task+'_adp.txt'),'w') as f:
+            f.writelines(["%s\n" % str(item).replace('\n','') for item in metric_adp])
+        with open(os.path.join(args.results_dir, args.task+'_noadp.txt'),'w') as f:
+            f.writelines(["%s\n" % str(item).replace('\n','') for item in metric_nadp])  
+        with open(os.path.join(args.results_dir, args.task+'_args.json'), 'w') as f:
+            json.dump(args.__dict__, f, indent=2)              
         return   
     # train
     if args.lgan and args.trainer != 'tnet':

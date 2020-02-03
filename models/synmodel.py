@@ -39,9 +39,9 @@ class SynANet(AdaptorNet):
         metric = []
         batch_size = pred.shape[0]
         for b_id in range(batch_size):
-            _metric = np.mean((pred[b_id] - label[b_id])**2)
-            _metric = compare_ssim(pred[b_id], label[b_id])            
-            metric.append(_metric)
+            _metric_mse = np.mean((pred[b_id] - label[b_id])**2)
+            _metric_ssim = compare_ssim(pred[b_id], label[b_id])            
+            metric.append([_metric_mse,_metric_ssim])
         return metric        
         
     def test(self):
@@ -60,7 +60,7 @@ class SynANet(AdaptorNet):
                 self.plot(tonp(pred_na[b_ix]), ids + '_predna.tif')
                 self.plot(tonp(self.image[b_ix]), ids + '_image.tif')
                 self.plot(tonp(self.label[b_ix]), ids + '_label.tif')
-        metric = [[0]*batch_size,[0]*batch_size] 
+        metric = [[],[]] 
         if self.opt.__dict__.get('cal_metric',True):
             metric[0] = self.cal_metric(pred.squeeze(1), self.label)
             metric[1] = self.cal_metric(pred_na.squeeze(1), self.label)

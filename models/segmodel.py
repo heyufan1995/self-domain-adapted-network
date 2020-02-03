@@ -24,11 +24,12 @@ class SegANet(AdaptorNet):
         self.AELoss = nn.MSELoss()
         self.ALoss = nn.MSELoss()   
         self.LGanLoss = nn.BCEWithLogitsLoss()
-    def cal_metric(self, pred, label):
+    def cal_metric(self, pred, label, ignore=[0,9,10]):
         """Calculate quantitative metric: Dice coefficient
         Args: 
             pred: [batch, channel, img_row, img_col]
-            label:[batch, img_row, img_col]
+            label: [batch, img_row, img_col]
+            ignore: ignore labels
         Return:
             dice: list of dice coefficients, [batch]
         """  
@@ -49,8 +50,8 @@ class SegANet(AdaptorNet):
                 if sumt == 0:
                     _dice[i] = np.nan
                 else:
-                    _dice[i] = 2*inter/(sump+sumt)     
-            _dice = np.nanmean(_dice)   
+                    _dice[i] = 2*inter/(sump+sumt)  
+            _dice = np.delete(_dice,ignore)
             dice.append(_dice)    
         return dice
     def test(self):
@@ -71,7 +72,7 @@ class SegANet(AdaptorNet):
                 self.plot(tonp(pred[b_ix]), ids + '_preda.png')
                 self.plot(tonp(pred_na[b_ix]), ids + '_predna.png')
                 self.plot(tonp(self.image[b_ix]), ids + '_image.png')
-        metric = [[0]*batch_size,[0]*batch_size]            
+        metric = [[],[]]            
         if self.opt.__dict__.get('cal_metric',True):
             metric[0] = self.cal_metric(pred, self.label.squeeze(1))
             metric[1] = self.cal_metric(pred_na, self.label.squeeze(1))

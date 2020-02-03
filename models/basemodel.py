@@ -75,6 +75,7 @@ class ANet(nn.Module):
         torch.manual_seed(0)
         self.conv.apply(init_weights_eye)
         self.adpNet.apply(init_weights)
+        self.cuda()
     def forward(self, x, TNet, side_out=False):
         """
         Args: 
