@@ -198,7 +198,7 @@ def main():
                 writer.writerow([epoch+1,m_loss])   
             if (epoch+1) % args.save_step == 0 or epoch+1 == args.epochs:
                 if args.trainer == 'tnet':
-                    loss = validate(model, val_loader, args, epoch, logger)
+                    loss = validate(model, val_loader[0], args, epoch, logger)
                 model.save_nets(epoch)
 
 def validate(model, val_loader, args, epoch, logger):
