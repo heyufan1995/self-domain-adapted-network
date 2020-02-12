@@ -47,19 +47,16 @@ class ANet(nn.Module):
         self.seq = seq 
         # use pre-contrast manipulation 
         if adpt:
-            if adpNet is None:      
+            if adpNet is None:
                 self.adpNet = nn.Sequential(
                     nn.Conv2d(1,64,1),
-                    nn.LeakyReLU(),
+                    nn.LeakyReLU(negative_slope=0.2),
                     nn.InstanceNorm2d(64),
                     nn.Conv2d(64,64,1),
-                    nn.LeakyReLU(),
-                    nn.InstanceNorm2d(64),
-                    nn.Conv2d(64,64,1),
-                    nn.LeakyReLU(),
-                    nn.InstanceNorm2d(64),      
+                    nn.LeakyReLU(negative_slope=0.2),
+                    nn.InstanceNorm2d(64),   
                     nn.Conv2d(64,1,1),
-                    nn.LeakyReLU(),
+                    nn.LeakyReLU(negative_slope=0.2),
                     nn.InstanceNorm2d(1)                    
                 )
                 self.adpNet.apply(init_weights)
@@ -74,7 +71,8 @@ class ANet(nn.Module):
         np.random.seed(0)
         torch.manual_seed(0)
         self.conv.apply(init_weights_eye)
-        self.adpNet.apply(init_weights)
+        if self.adpt and self.adpNet is not None:
+            self.adpNet.apply(init_weights)
         self.cuda()
     def forward(self, x, TNet, side_out=False):
         """
@@ -228,12 +226,24 @@ class AdaptorNet(nn.Module):
                 sz = self.opt.pad_size
         if self.opt.task == 'syn':out = 1 
         else:out = 11
+        # self.AENet = [AENet(channel=1,midplane=[32,16,8],\
+        #               bottleneck=nn.Sequential(nn.Conv2d(8,8,1),nn.Softmax2d())),\
+        #               AENet(channel=128,midplane=[64,32,16],\
+        #               bottleneck=nn.Sequential(nn.Conv2d(16,16,1),nn.Softmax2d())),\
+        #               AENet(channel=128,midplane=[64,32,16],\
+        #               bottleneck=nn.Sequential(nn.Conv2d(16,16,1),nn.Softmax2d())),\
+        #               AENet(channel=128,midplane=[64,32,16],\
+        #               bottleneck=nn.Sequential(nn.Conv2d(16,16,1),nn.Softmax2d())),\
+        #               AENet(channel=128,midplane=[64,32,16],\
+        #               bottleneck=nn.Sequential(nn.Conv2d(16,16,1),nn.Softmax2d())),\
+        #               AENet(channel=out,midplane=[32,16,8],\
+        #               bottleneck=nn.Sequential(nn.Conv2d(8,8,1),nn.Softmax2d()))]  
         self.AENet = [AENet(channel=1,midplane=[32,16,8]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
-                      AENet(channel=out,midplane=[32,16,8])]      
+                      AENet(channel=out,midplane=[32,16,8])]              
         # the matching index of TNet features          
         self.AENetMatch = [[0],[1,-2],[2,-3],[3,-4],[4,-5],[-1]] 
     def def_ANet(self):
@@ -396,7 +406,7 @@ class AdaptorNet(nn.Module):
                                                side_out[self.AENetMatch[_][1]]], dim=1))
             else:
                 # use seperate features
-                side_out_cat.append(side_out[self.AENetMatch[_][0]])                    
+                side_out_cat.append(side_out[self.AENetMatch[_][0]])                       
             ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
             level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
             loss += level_loss
