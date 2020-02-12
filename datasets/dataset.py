@@ -18,6 +18,7 @@ logger = logging.getLogger('global')
 warnings.filterwarnings("ignore")
 from utils.util import generate_mask
 import tifffile as tiff
+import nibabel
 class ABCDataset(Dataset):
     """Abstract Basic class for the dataset
     """
@@ -78,18 +79,23 @@ class PairDataset(ABCDataset):
     def _get_data(self,idx):
         # implement _get_data method
         # the label comes from matlab, remenber -1 in boundary points
+        pdb.set_trace()
         if self.file_ext == 'tif':
             data = tiff.imread(str(self.datalist[idx])).astype(np.float32)
-        else:
+        elif self.file_ext == 'png':
             data = misc.imread(str(self.datalist[idx]),mode = 'L')
             data = (data/255).astype(np.float32)
+        elif self.file_ext == 'nii.gz':
+            data = nibabel.load(str(self.datalist[idx])).get_data().T
         label = data # default is reconstruction
         if len(self.labellist) > 0:
             if self.lab_ext == 'tif':
                 label = tiff.imread(str(self.labellist[idx])).astype(np.float32)
-            else:
+            elif self.lab_ext == 'png':
                 label = misc.imread(str(self.labellist[idx]),mode = 'L')
                 label = (label/255).astype(np.float32)
+            elif self.lab_ext == 'nii.gz':
+                label = nibabel.load(str(self.labellist[idx])).get_data().T
         data = (data - np.mean(data))/np.std(data)
         label = (label - np.mean(label))/np.std(label)
         sample = {'data':data, 'label':label, 'filename':str(self.datalist[idx])}
