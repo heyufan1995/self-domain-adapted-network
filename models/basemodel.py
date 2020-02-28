@@ -430,7 +430,7 @@ class AdaptorNet(nn.Module):
                 image = np.argmax(image,axis=0)
             tiff.imsave(os.path.join(self.opt.results_dir,'image',ids), image)
         else:
-            fig = plt.figure()
+            fig = plt.figure(1)
             height = float(image.shape[-2])
             width = float(image.shape[-1])        
             fig.set_size_inches(width/height, 1, forward=False)
@@ -442,6 +442,7 @@ class AdaptorNet(nn.Module):
             else:
                 ax.imshow(image,cmap='gray')
             fig.savefig(os.path.join(self.opt.results_dir,'image',ids),dpi=height)
+            plt.close(fig)
     def plot_hist(self,image,ids, xlim=[-1.5,3]):
         """Plot joint histogram
         Args:

@@ -79,7 +79,6 @@ class PairDataset(ABCDataset):
     def _get_data(self,idx):
         # implement _get_data method
         # the label comes from matlab, remenber -1 in boundary points
-        pdb.set_trace()
         if self.file_ext == 'tif':
             data = tiff.imread(str(self.datalist[idx])).astype(np.float32)
         elif self.file_ext == 'png':
@@ -132,8 +131,13 @@ class SegDataset(PairDataset):
         sample = {'data':data, 'label':mask, 'filename':str(self.datalist[idx])}
         return sample
 
-def split_data(dataset,split):
-    ''' split training data into training/validation '''
+def split_data(dataset,split,switch=False):
+    ''' split training data into training/validation
+        Args: 
+            split[0] - split[1] val
+            split[1] - split[2] train
+            switch: switch returned dataset
+    '''
     traindataset = deepcopy(dataset)
     valdataset = deepcopy(dataset)
     if len(split)>2:
@@ -146,7 +150,10 @@ def split_data(dataset,split):
     traindataset.labellist = [dataset.labellist[i] for i in traidx]
     valdataset.datalist = [dataset.datalist[i] for i in validx]
     valdataset.labellist = [dataset.labellist[i] for i in validx]
-    return traindataset, valdataset      
+    if switch: # switch train/val to return the correct test set
+        return valdataset, traindataset
+    else:
+        return traindataset, valdataset      
 
 
 
