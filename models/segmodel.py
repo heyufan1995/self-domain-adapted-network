@@ -11,7 +11,7 @@ import matplotlib.colors as mcolors
 import logging
 logger = logging.getLogger('global')
 from models.basemodel import tonp, AdaptorNet
- 
+
 class SegANet(AdaptorNet):
     def __init__(self, opt):
          super(SegANet,self).__init__(opt)
@@ -62,8 +62,9 @@ class SegANet(AdaptorNet):
         with torch.no_grad():
             pred = self.ANet(self.image, self.TNet, side_out=True)
             pred, adapt_img = pred[-1], pred[0]
-            pred = F.softmax(self.ANet(self.image, self.TNet), dim=1)
-            pred_na = F.softmax(self.TNet(self.image), dim=1)
+            pred_na = self.TNet(self.image)          
+            pred = F.softmax(pred, dim=1)
+            pred_na = F.softmax(pred_na, dim=1)
         batch_size = self.image.shape[0]   
         if self.opt.saveimage:
             for b_ix in range(batch_size):

@@ -226,18 +226,6 @@ class AdaptorNet(nn.Module):
                 sz = self.opt.pad_size
         if self.opt.task == 'syn':out = 1 
         else:out = 11
-        # self.AENet = [AENet(channel=1,midplane=[32,16,8],\
-        #               bottleneck=nn.Sequential(nn.Conv2d(8,8,1),nn.Softmax2d())),\
-        #               AENet(channel=128,midplane=[64,32,16],\
-        #               bottleneck=nn.Sequential(nn.Conv2d(16,16,1),nn.Softmax2d())),\
-        #               AENet(channel=128,midplane=[64,32,16],\
-        #               bottleneck=nn.Sequential(nn.Conv2d(16,16,1),nn.Softmax2d())),\
-        #               AENet(channel=128,midplane=[64,32,16],\
-        #               bottleneck=nn.Sequential(nn.Conv2d(16,16,1),nn.Softmax2d())),\
-        #               AENet(channel=128,midplane=[64,32,16],\
-        #               bottleneck=nn.Sequential(nn.Conv2d(16,16,1),nn.Softmax2d())),\
-        #               AENet(channel=out,midplane=[32,16,8],\
-        #               bottleneck=nn.Sequential(nn.Conv2d(8,8,1),nn.Softmax2d()))]  
         self.AENet = [AENet(channel=1,midplane=[32,16,8]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
