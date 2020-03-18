@@ -385,7 +385,8 @@ class AdaptorNet(nn.Module):
         self.optimizer_ANet.zero_grad()
         loss = 0
         loss_list = []
-        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))                
+        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))    
+        orthw = self.opt.__dict__.get('orthw', 1)            
         for _ in range(len(self.AENet)):
             """Keep this part the same with opt_AENet"""
             if len(self.AENetMatch[_]) == 2:
@@ -399,9 +400,9 @@ class AdaptorNet(nn.Module):
             level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
             loss += level_loss
             loss_list.append(level_loss.data.item())       
-        org_loss = l2_reg_ortho(self.ANet.conv)   
-        logger.info('ord loss:{}'.format(org_loss.data.item()))
-        loss += 1*org_loss
+        org_loss = orthw*l2_reg_ortho(self.ANet.conv)   
+        loss += org_loss
+        loss_list.append(org_loss.data.item())
         loss.backward()
         self.optimizer_ANet.step()
         return loss_list

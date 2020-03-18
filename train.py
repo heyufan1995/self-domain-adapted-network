@@ -14,7 +14,7 @@ from scipy import misc
 import numpy as np
 np.random.seed(0)
 import json,csv
-
+import time
 import torch
 torch.manual_seed(0)
 import torch.backends.cudnn as cudnn
@@ -79,6 +79,8 @@ parser.add_argument('--seq',dest='seq', type=lambda x: list(map(int, x.split(','
                     help='the 1x1 conv seq to be used in A-Net')
 parser.add_argument('--wt',dest='weights', type=lambda x: list(map(float, x.split(','))),
                     help='weights in training ae net') 
+parser.add_argument('--wo',dest='orthw', default=1, type=float,
+                    help='orthogonal weights in training ANet') 
 parser.add_argument('--ps',dest='pad_size', type=lambda x: list(map(float, x.split(','))),
                     help='padding all the input image to this size')     
 parser.add_argument('--scs',dest='scale_size', type=lambda x: list(map(float, x.split(','))),
@@ -126,10 +128,13 @@ def main():
             model.ANet.reset()
             prev_loss = np.inf
             sub_metric_adp, sub_metric_nadp = [], []
+            start_time = time.time()
             for epoch in range(args.tepochs):  
                 m_loss = 0                                       
                 for iters, data in enumerate(val_loader[sub]):               
                     model.set_input(data)
+                    if iters == 0:
+                        logger.info('subject name {}'.format(model.filename))
                     loss = model.opt_ANet(epoch)
                     logger.info('[{}/{}][{}/{}] Adaptor Loss: {}'.format(\
                                 epoch+1, args.tepochs, iters, len(val_loader[sub]), loss))  
@@ -138,9 +143,11 @@ def main():
                 if 0.95*prev_loss < m_loss: 
                     break                    
                 else: 
-                    prev_loss = m_loss     
+                    prev_loss = m_loss  
+            logger.info('training time:{}'.format(time.time()-start_time))    
             # start testing
-            logger.info('starting inference')            
+            logger.info('starting inference')   
+            start_time = time.time()         
             for iters, data in enumerate(val_loader[sub]):
                 logger.info('[%d/%d]' % (iters, len(val_loader[sub])))
                 model.set_input(data)
@@ -155,7 +162,8 @@ def main():
             sub_metric_adp, sub_metric_nadp = np.vstack(sub_metric_adp), np.vstack(sub_metric_nadp)
             logger.info('sub {} mean metric adp/noadp\n{}\n{}'.format(sub+1, \
                          str(np.mean(sub_metric_adp,axis=0)).replace('\n',''),\
-                         str(np.mean(sub_metric_nadp,axis=0)).replace('\n','')))   
+                         str(np.mean(sub_metric_nadp,axis=0)).replace('\n','')))  
+            logger.info('testing time:{}'.format(time.time()-start_time))     
         metric_adp, metric_nadp = np.vstack(metric_adp), np.vstack(metric_nadp)
         logger.info('Overall mean metric adp/noadp:\n{}[{}]\n{}[{}]'.\
                     format(str(np.mean(metric_adp,axis=0)).replace('\n',''),\
