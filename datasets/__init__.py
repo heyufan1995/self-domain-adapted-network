@@ -20,8 +20,8 @@ def create_dataset(args):
                                 labelpath=args.label_path,
                                 file_ext=args.img_ext, 
                                 lab_ext=args.label_ext)
-    if args.vimg_path:   
-        val_dataset_list = []
+    val_dataset_list = []
+    if args.vimg_path:           
         val_dataset = dataset(filepath=args.vimg_path, 
                                  labelpath=args.vlabel_path,
                                  file_ext=args.img_ext,
@@ -43,24 +43,30 @@ def create_dataset(args):
 
     elif args.split and not args.__dict__.get('sub_name',False):
         train_dataset, val_dataset = split_data(dataset=train_dataset,
-                                                split=args.split)
+                                                split=args.split,
+                                                switch=args.test or args.evaluate)
         train_dataset = train_dataset
         val_dataset = val_dataset
+        val_dataset_list = [val_dataset]
     else:
         # no validation used
         val_dataset = dataset()
+        val_dataset_list = [val_dataset]
     # transform
     # pass
     # normalize
     # pass
+    # check lablelist is non-empty
+    if sum([len(_.labellist) == 0 for _ in val_dataset_list]):
+        logger.warning('None-exist label: use data as label')
     train_loader = DataLoader(dataset=train_dataset, 
                               batch_size=args.batch_size,
                               shuffle=True,
                               num_workers=args.workers, 
                               pin_memory=True)
     val_loader = [DataLoader(dataset=_,
-                            batch_size=1,
-                            shuffle=True,
+                            batch_size=args.batch_size,
+                            shuffle=False,
                             num_workers=args.workers,
                             pin_memory=True) for _ in val_dataset_list]
     return train_loader, val_loader

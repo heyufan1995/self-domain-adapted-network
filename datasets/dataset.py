@@ -18,6 +18,7 @@ logger = logging.getLogger('global')
 warnings.filterwarnings("ignore")
 from utils.util import generate_mask
 import tifffile as tiff
+import nibabel
 class ABCDataset(Dataset):
     """Abstract Basic class for the dataset
     """
@@ -80,16 +81,20 @@ class PairDataset(ABCDataset):
         # the label comes from matlab, remenber -1 in boundary points
         if self.file_ext == 'tif':
             data = tiff.imread(str(self.datalist[idx])).astype(np.float32)
-        else:
+        elif self.file_ext == 'png':
             data = misc.imread(str(self.datalist[idx]),mode = 'L')
             data = (data/255).astype(np.float32)
+        elif self.file_ext == 'nii.gz':
+            data = nibabel.load(str(self.datalist[idx])).get_data().T
         label = data # default is reconstruction
         if len(self.labellist) > 0:
             if self.lab_ext == 'tif':
                 label = tiff.imread(str(self.labellist[idx])).astype(np.float32)
-            else:
+            elif self.lab_ext == 'png':
                 label = misc.imread(str(self.labellist[idx]),mode = 'L')
                 label = (label/255).astype(np.float32)
+            elif self.lab_ext == 'nii.gz':
+                label = nibabel.load(str(self.labellist[idx])).get_data().T
         data = (data - np.mean(data))/np.std(data)
         label = (label - np.mean(label))/np.std(label)
         sample = {'data':data, 'label':label, 'filename':str(self.datalist[idx])}
@@ -126,8 +131,13 @@ class SegDataset(PairDataset):
         sample = {'data':data, 'label':mask, 'filename':str(self.datalist[idx])}
         return sample
 
-def split_data(dataset,split):
-    ''' split training data into training/validation '''
+def split_data(dataset,split,switch=False):
+    ''' split training data into training/validation
+        Args: 
+            split[0] - split[1] val
+            split[1] - split[2] train
+            switch: switch returned dataset
+    '''
     traindataset = deepcopy(dataset)
     valdataset = deepcopy(dataset)
     if len(split)>2:
@@ -140,7 +150,10 @@ def split_data(dataset,split):
     traindataset.labellist = [dataset.labellist[i] for i in traidx]
     valdataset.datalist = [dataset.datalist[i] for i in validx]
     valdataset.labellist = [dataset.labellist[i] for i in validx]
-    return traindataset, valdataset      
+    if switch: # switch train/val to return the correct test set
+        return valdataset, traindataset
+    else:
+        return traindataset, valdataset      
 
 
 

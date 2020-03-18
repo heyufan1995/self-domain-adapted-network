@@ -47,19 +47,16 @@ class ANet(nn.Module):
         self.seq = seq 
         # use pre-contrast manipulation 
         if adpt:
-            if adpNet is None:      
+            if adpNet is None:
                 self.adpNet = nn.Sequential(
                     nn.Conv2d(1,64,1),
-                    nn.LeakyReLU(),
+                    nn.LeakyReLU(negative_slope=0.2),
                     nn.InstanceNorm2d(64),
                     nn.Conv2d(64,64,1),
-                    nn.LeakyReLU(),
-                    nn.InstanceNorm2d(64),
-                    nn.Conv2d(64,64,1),
-                    nn.LeakyReLU(),
-                    nn.InstanceNorm2d(64),      
+                    nn.LeakyReLU(negative_slope=0.2),
+                    nn.InstanceNorm2d(64),   
                     nn.Conv2d(64,1,1),
-                    nn.LeakyReLU(),
+                    nn.LeakyReLU(negative_slope=0.2),
                     nn.InstanceNorm2d(1)                    
                 )
                 self.adpNet.apply(init_weights)
@@ -74,7 +71,8 @@ class ANet(nn.Module):
         np.random.seed(0)
         torch.manual_seed(0)
         self.conv.apply(init_weights_eye)
-        self.adpNet.apply(init_weights)
+        if self.adpt and self.adpNet is not None:
+            self.adpNet.apply(init_weights)
         self.cuda()
     def forward(self, x, TNet, side_out=False):
         """
@@ -233,7 +231,7 @@ class AdaptorNet(nn.Module):
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
                       AENet(channel=128,midplane=[64,32,16]),\
-                      AENet(channel=out,midplane=[32,16,8])]      
+                      AENet(channel=out,midplane=[32,16,8])]              
         # the matching index of TNet features          
         self.AENetMatch = [[0],[1,-2],[2,-3],[3,-4],[4,-5],[-1]] 
     def def_ANet(self):
@@ -387,7 +385,8 @@ class AdaptorNet(nn.Module):
         self.optimizer_ANet.zero_grad()
         loss = 0
         loss_list = []
-        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))                
+        weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))    
+        orthw = self.opt.__dict__.get('orthw', 1)            
         for _ in range(len(self.AENet)):
             """Keep this part the same with opt_AENet"""
             if len(self.AENetMatch[_]) == 2:
@@ -396,14 +395,14 @@ class AdaptorNet(nn.Module):
                                                side_out[self.AENetMatch[_][1]]], dim=1))
             else:
                 # use seperate features
-                side_out_cat.append(side_out[self.AENetMatch[_][0]])                    
+                side_out_cat.append(side_out[self.AENetMatch[_][0]])                       
             ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
             level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
             loss += level_loss
             loss_list.append(level_loss.data.item())       
-        org_loss = l2_reg_ortho(self.ANet.conv)   
-        logger.info('ord loss:{}'.format(org_loss.data.item()))
-        loss += 1*org_loss
+        org_loss = orthw*l2_reg_ortho(self.ANet.conv)   
+        loss += org_loss
+        loss_list.append(org_loss.data.item())
         loss.backward()
         self.optimizer_ANet.step()
         return loss_list
@@ -420,7 +419,7 @@ class AdaptorNet(nn.Module):
                 image = np.argmax(image,axis=0)
             tiff.imsave(os.path.join(self.opt.results_dir,'image',ids), image)
         else:
-            fig = plt.figure()
+            fig = plt.figure(1)
             height = float(image.shape[-2])
             width = float(image.shape[-1])        
             fig.set_size_inches(width/height, 1, forward=False)
@@ -432,6 +431,7 @@ class AdaptorNet(nn.Module):
             else:
                 ax.imshow(image,cmap='gray')
             fig.savefig(os.path.join(self.opt.results_dir,'image',ids),dpi=height)
+            plt.close(fig)
     def plot_hist(self,image,ids, xlim=[-1.5,3]):
         """Plot joint histogram
         Args:
