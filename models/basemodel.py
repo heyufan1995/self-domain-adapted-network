@@ -15,6 +15,7 @@ logger = logging.getLogger('global')
 def tonp(x):
     return x.squeeze().data.cpu().numpy()
 def init_weights(x):
+    torch.manual_seed(0)
     if type(x) == nn.Conv2d:
         nn.init.kaiming_normal_(x.weight.data)
         nn.init.zeros_(x.bias.data)         
@@ -68,8 +69,6 @@ class ANet(nn.Module):
             self.conv.append(convs)
         self.conv.apply(init_weights_eye)
     def reset(self):
-        np.random.seed(0)
-        torch.manual_seed(0)
         self.conv.apply(init_weights_eye)
         if self.adpt and self.adpNet is not None:
             self.adpNet.apply(init_weights)
@@ -261,7 +260,7 @@ class AdaptorNet(nn.Module):
         """
         pass
     def set_requires_grad(self, nets, requires_grad=False, cuda=True):
-        """Set requies_grad=Fasle and move to cuda
+        """Set requies_grad=False and move to cuda
         """
         if not isinstance(nets, list):
             nets = [nets]
@@ -370,7 +369,7 @@ class AdaptorNet(nn.Module):
         """Optimize Auto-Encoder and Task Net jointly
         """
         pass
-    def opt_ANet(self,epoch):
+    def opt_ANet(self,epoch,stable=False):
         """Optimize Adaptor
         """
         self.set_requires_grad([self.TNet] + self.AENet, False) 
@@ -386,23 +385,27 @@ class AdaptorNet(nn.Module):
         loss = 0
         loss_list = []
         weights = self.opt.__dict__.get('weights', [1]*len(self.AENet))    
-        orthw = self.opt.__dict__.get('orthw', 1)            
-        for _ in range(len(self.AENet)):
-            """Keep this part the same with opt_AENet"""
-            if len(self.AENetMatch[_]) == 2:
-                # concatenate features from the same level
-                side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
-                                               side_out[self.AENetMatch[_][1]]], dim=1))
-            else:
-                # use seperate features
-                side_out_cat.append(side_out[self.AENetMatch[_][0]])                       
-            ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
-            level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
-            loss += level_loss
-            loss_list.append(level_loss.data.item())       
-        org_loss = orthw*l2_reg_ortho(self.ANet.conv)   
-        loss += org_loss
-        loss_list.append(org_loss.data.item())
+        orthw = self.opt.__dict__.get('orthw', 1)  
+        if stable:
+            loss += self.AELoss(side_out[0],self.image)
+            loss_list.append(loss.data.item())      
+        else:        
+            for _ in range(len(self.AENet)):
+                """Keep this part the same with opt_AENet"""
+                if len(self.AENetMatch[_]) == 2:
+                    # concatenate features from the same level
+                    side_out_cat.append(torch.cat([side_out[self.AENetMatch[_][0]], \
+                                                side_out[self.AENetMatch[_][1]]], dim=1))
+                else:
+                    # use seperate features
+                    side_out_cat.append(side_out[self.AENetMatch[_][0]])                       
+                ae_out.append(self.AENet[_](side_out_cat[_],side_out=False))
+                level_loss = weights[_]*self.AELoss(ae_out[_], side_out_cat[_])
+                loss += level_loss
+                loss_list.append(level_loss.data.item())       
+            org_loss = orthw*l2_reg_ortho(self.ANet.conv)   
+            loss += org_loss
+            loss_list.append(org_loss.data.item())
         loss.backward()
         self.optimizer_ANet.step()
         return loss_list

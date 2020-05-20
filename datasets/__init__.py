@@ -66,7 +66,7 @@ def create_dataset(args):
                               pin_memory=True)
     val_loader = [DataLoader(dataset=_,
                             batch_size=args.batch_size,
-                            shuffle=False,
+                            shuffle=True,
                             num_workers=args.workers,
                             pin_memory=True) for _ in val_dataset_list]
     return train_loader, val_loader

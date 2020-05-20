@@ -26,11 +26,13 @@ from models import create_model
 from utils.util import setlogger
 parser = argparse.ArgumentParser(description='PyTorch parser')
 parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
-                    help='number of data loading workers (default: 2)')
+                    help='number of data loading workers (default: 2)')             
 parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--tepochs', default=5, type=int, metavar='N',
-                    help='number of total epochs to run')                    
+                    help='number of total epochs to run')   
+parser.add_argument('--sepochs', default=0, type=int, metavar='N',
+                    help='number of total epochs to pre-train')                   
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('-b', '--batch-size', default=2, type=int,
@@ -125,10 +127,25 @@ def main():
         metric_adp, metric_nadp = [], []
         for sub in range(len(val_loader)):
             logger.info('testing subject:{}/{}'.format(sub+1,len(val_loader)))
+            # for each test subject, reset optimizer/ANet weights            
             model.ANet.reset()
+            model.set_opt()
             prev_loss = np.inf
             sub_metric_adp, sub_metric_nadp = [], []
             start_time = time.time()
+            # stablize training by pre-train histogram manipulator (if needed)
+            for epoch in range(args.sepochs):  
+                m_loss = 0                                       
+                for iters, data in enumerate(val_loader[sub]):               
+                    model.set_input(data)
+                    if iters == 0:
+                        logger.info('using stable on subject {}'.format(model.filename))
+                    loss = model.opt_ANet(epoch,stable=True)
+                    logger.info('[{}/{}][{}/{}] stable Loss: {}'.format(\
+                                epoch+1, args.sepochs, iters, len(val_loader[sub]), loss))  
+                    m_loss += np.sum(loss)/len(val_loader[sub])
+                logger.info('[%d/%d] Mean Loss: %.5f' % (epoch+1, args.tepochs, m_loss)) 
+            model.set_opt()
             for epoch in range(args.tepochs):  
                 m_loss = 0                                       
                 for iters, data in enumerate(val_loader[sub]):               
