@@ -1,4 +1,4 @@
-# Self supervised adaptation
+# Self domain adapted network
 The source code for the paper: 
 
 ***Self domain adapted network*** ([MICCAI2020](https://arxiv.org/abs/2007.03162))
