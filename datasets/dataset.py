@@ -161,41 +161,6 @@ class MRISynDataset(PairedDataset):
                                 'angle':self.opt.affine_angle,
                                 'translate':self.opt.affine_translate,
                                 'scale':self.opt.affine_scale})]
-            transform_list += [registered_workers['hflip']({'p':self.opt.aug_prob})]
-            # transform_list +=[registered_workers['noise'](\
-            #                   {'p':self.opt.aug_prob,
-            #                    'std':self.opt.noise_std})]            
+            transform_list += [registered_workers['hflip']({'p':self.opt.aug_prob})]           
         transform_list += [registered_workers['normalize']({'n_label':True})]
         return Composer(transform_list)     
-
-class ProstateSegDataset(PairedDataset):
-    # specifically for Prostate segmentation
-    def __init__(self, opt, train=True, augment=True):
-        super(ProstateSegDataset, self).__init__(opt, train, augment)  
-    def _get_image(self,index):
-        image = np.load(str(self.datalist[index]))['image'].astype(np.float32)
-        return image
-    def _get_label(self,index):
-        label = np.load(str(self.labellist[index]))['label'].astype(np.uint8)
-        label[label>0] = 1
-        return label    
-    def _get_transform(self):
-        # dataset specific augmentation
-        transform_list = []
-        if self.augment:
-            transform_list +=[registered_workers['gamma'](\
-                              {'p':self.opt.aug_prob,
-                               'gamma':self.opt.gamma})]
-            transform_list += [registered_workers['affine'](\
-                               {'p':self.opt.aug_prob,
-                                'angle':self.opt.affine_angle,
-                                'translate':self.opt.affine_translate,
-                                'scale':self.opt.affine_scale})]
-            transform_list += [registered_workers['hflip']({'p':self.opt.aug_prob})]
-        transform_list += [registered_workers['normalize']({'n_label':False})]
-        if self.augment:
-            transform_list +=[registered_workers['noise'](\
-                    {'p':self.opt.aug_prob,
-                    'std':self.opt.noise_std})]   
-        transform_list += [registered_workers['padcrop']({'width':self.opt.width, 'height':self.opt.height})]        
-        return Composer(transform_list)    

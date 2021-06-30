@@ -1,4 +1,4 @@
-from datasets.dataset import MRISynDataset,OCTSegDataset, ProstateSegDataset
+from datasets.dataset import MRISynDataset,OCTSegDataset
 from utils.util import split_data
 from torch.utils.data import Dataset, DataLoader
 import os
@@ -14,8 +14,6 @@ def create_dataset(args):
         dataset = MRISynDataset
     elif args.task == 'seg_oct':
         dataset = OCTSegDataset
-    elif args.task == 'seg_prostate':
-        dataset = ProstateSegDataset
     else:
         raise NotImplementedError
     train_dataset = dataset(args, train=True, augment=True)
