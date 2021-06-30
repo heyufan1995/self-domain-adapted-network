@@ -2,9 +2,20 @@ import os
 import json
 import logging
 import numpy as np
+import random
+from copy import deepcopy
 import torch
 from torch.autograd import Variable
 from torch.nn.functional import normalize
+def deterministic(seed=0):
+    torch.manual_seed(0)
+    torch.cuda.manual_seed(0)
+    torch.cuda.manual_seed_all(0)
+    torch.backends.cudnn.deterministic=True
+    torch.backends.cudnn.benchmark=False
+    np.random.seed(0)
+    random.seed(0)    
+    
 def grams(x):
     """Return gram matrix for input feature
     Args:
@@ -112,3 +123,27 @@ def l2_reg_ortho(mdl):
 			else:
 				l2_reg = l2_reg + (sigma)**2
 	return l2_reg
+
+def split_data(dataset,split,switch=False):
+    ''' split training data into training/validation
+        Args: 
+            split[0] - split[1] val
+            split[1] - split[2] train
+            switch: switch returned dataset
+    '''
+    traindataset = deepcopy(dataset)
+    valdataset = deepcopy(dataset)
+    if len(split)>2:
+        idx = np.arange(split[0],split[-1])
+    else:
+        idx = np.arange(len(dataset))
+    validx = np.arange(int(split[0]),int(split[1]),dtype=np.uint8)
+    traidx = np.array(list(set(idx)-set(validx)),dtype=np.uint8)
+    traindataset.datalist = [dataset.datalist[i] for i in traidx]
+    traindataset.labellist = [dataset.labellist[i] for i in traidx]
+    valdataset.datalist = [dataset.datalist[i] for i in validx]
+    valdataset.labellist = [dataset.labellist[i] for i in validx]
+    if switch: # switch train/val to return the correct test set
+        return valdataset, traindataset
+    else:
+        return traindataset, valdataset   

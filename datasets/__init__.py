@@ -1,5 +1,5 @@
-from datasets.dataset import PairDataset,SegDataset
-from datasets.dataset import split_data
+from datasets.dataset import MRISynDataset,OCTSegDataset, ProstateSegDataset
+from utils.util import split_data
 from torch.utils.data import Dataset, DataLoader
 import os
 import pdb
@@ -10,22 +10,18 @@ def create_dataset(args):
     ''' Create train and val dataset
     '''
     # Data loading code
-    if args.task == 'syn':
-        dataset = PairDataset
-    elif args.task == 'seg':
-        dataset = SegDataset
+    if args.task == 'syn_t1':
+        dataset = MRISynDataset
+    elif args.task == 'seg_oct':
+        dataset = OCTSegDataset
+    elif args.task == 'seg_prostate':
+        dataset = ProstateSegDataset
     else:
         raise NotImplementedError
-    train_dataset = dataset(filepath=args.img_path, 
-                                labelpath=args.label_path,
-                                file_ext=args.img_ext, 
-                                lab_ext=args.label_ext)
+    train_dataset = dataset(args, train=True, augment=True)
     val_dataset_list = []
     if args.vimg_path:           
-        val_dataset = dataset(filepath=args.vimg_path, 
-                                 labelpath=args.vlabel_path,
-                                 file_ext=args.img_ext,
-                                 lab_ext=args.label_ext)
+        val_dataset = dataset(args, train=False, augment=False)
         # return a list of val_dataset, each contains one subject             
         if args.__dict__.get('sub_name',False):
             if os.path.isfile(args.sub_name):
@@ -39,8 +35,6 @@ def create_dataset(args):
                 val_dataset_list.append(deepcopy(val_dataset))
         else:
             val_dataset_list = [val_dataset]
-
-
     elif args.split and not args.__dict__.get('sub_name',False):
         train_dataset, val_dataset = split_data(dataset=train_dataset,
                                                 split=args.split,
@@ -50,15 +44,11 @@ def create_dataset(args):
         val_dataset_list = [val_dataset]
     else:
         # no validation used
-        val_dataset = dataset()
+        val_dataset = dataset(args, train=False)
         val_dataset_list = [val_dataset]
-    # transform
-    # pass
-    # normalize
-    # pass
-    # check lablelist is non-empty
-    if sum([len(_.labellist) == 0 for _ in val_dataset_list]):
-        logger.warning('None-exist label: use data as label')
+    logger.info('Found {} training samples'.format(len(train_dataset)))
+    logger.info('Found {} validation subjects with total {} samples'.format(len(val_dataset_list),len(val_dataset)))
+
     train_loader = DataLoader(dataset=train_dataset, 
                               batch_size=args.batch_size,
                               shuffle=True,

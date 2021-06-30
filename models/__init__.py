@@ -7,9 +7,9 @@ logger = logging.getLogger('global')
 def create_model(args):
     """Create a model and load its weights if given
     """
-    if args.task == 'syn':
+    if 'syn' in args.task:
         adaptorNet = SynANet
-    elif args.task == 'seg':
+    elif 'seg' in args.task:
         adaptorNet = SegANet
     else:
         raise NotImplementedError    
@@ -17,7 +17,5 @@ def create_model(args):
     if args.resume_T:
         model.load_nets(args.resume_T, name='tnet')
     if args.resume_AE:
-        model.load_nets(args.resume_AE, name='aenet')    
-    if args.resume_LG:
-        model.load_nets(args.resume_LG, name='lgan')           
+        model.load_nets(args.resume_AE, name='aenet')           
     return model

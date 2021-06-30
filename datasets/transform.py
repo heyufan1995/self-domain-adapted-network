@@ -5,175 +5,205 @@ import logging
 logger = logging.getLogger('global')
 from matplotlib import pyplot as plt
 from scipy import interpolate
-class OCTTransform(object):
-    def __init__(self, scales=None, crop=None, flip=False , valcrop=None, addnan=None):
-        # scales are the min and max height
-        self.scales=scales                
-        self.flip = flip
-        self.crop = crop
-        # used in validation. crop the image due to memory issue.
-        self.valcrop = valcrop
-        self.addnan = addnan
-    def __call__(self, sample):
-        """
-        Args: 
-        data [img_rows, img_cols]
-        bds [bdc, img_cols]
-        mask [img_rows, img_cols]
-        """
-        data, bds, mask = sample['data'], sample['bds'], sample['mask']
-        h,w = data.shape
-        if self.addnan:
-            # the DME dataset does not have ELM layer
-            # add it to the DME data 
-            # make sure it's DME
-            assert bds.shape[0] == 8
-            bds = np.vstack([bds[:-3,:],np.zeros(bds.shape[-1])*np.nan,bds[-3:,:]])
-            mask[mask>5] += 1
-        if self.flip:
-            if np.random.random() < 0.5:
-                # copy() needed for negative stride problem in pytorch from_numpy
-                # may be solved by future pytorch version
-                data = np.flip(data,-1).copy()
-                bds = np.flip(bds,-1).copy()
-                mask = np.flip(mask,-1).copy()
-        
-        h_n = h
-        if self.scales:
-            # scale [min_height, max_heigh, mode]
-            # mode 0: retina scaling inside image and random crop, used for DME
-            # mode 1: the choroid is not crropped.
-            # mode 2: rescale the image to a fixed size, default 512x512, used
-            #         in no flattening setting 
-            if len(self.scales) == 2:
-                self.scales.append(0)
-            if self.scales[-1] == 2:
-                sizes = data.shape
-                data = cv2.resize(data, tuple(self.scales[:-1]), interpolation=cv2.INTER_CUBIC)
-                mask = cv2.resize(mask, tuple(self.scales[:-1]), interpolation=cv2.INTER_NEAREST)
-                if sizes[0] != self.scales[0]:
-                    bds = bds*self.scales[0]/sizes[0]
-                if sizes[1] != self.scales[1]:
-                    f = interpolate.interp1d(np.arange(sizes[1]), bds, axis=-1)
-                    xnew = np.linspace(0, sizes[1]-1, self.scales[1])
-                    bds = f(xnew)                    
+import torch
+from PIL import Image
+import torchvision.transforms.functional as TF
+from monai.transforms import Affine, AdjustContrast, ResizeWithPadOrCrop
+import random
+
+class Composer(object):
+    def __init__(self, workers):
+        self.workers = workers
+    def __call__(self, image, label):
+        for _ in self.workers:
+            image,label = _(image,label)
+        return image, label
+    def get_params(self):
+        # get the latest transformation parameters
+        # change after the composer being called
+        params = {}
+        for _ in self.workers:
+            params[_.name()] = _.params
+        return params
+    def get_rdparams(self):
+        # get the transformation random range
+        rdparams = {}
+        for _ in self.workers:
+            rdparams[_.name()] = _.rdparams
+        return rdparams
+
+class Worker(object):
+    def __init__(self, rdparams={}):
+        pass
+    def name(self):
+        return 'Base class for transform'
+    def _random(self):
+        # generate final transformation params from rdparams
+        pass
+    def __call__(self, image, label, params=None):
+        pass
+
+class _normalize_worker(Worker):
+    def __init__(self,rdparams={}):
+        super(_normalize_worker,self).__init__(rdparams)
+        default_rdparams = {'n_label':False,'mean':0.0,'std':1.0}
+        default_rdparams.update(rdparams)
+        self.rdparams = default_rdparams
+    def name(self):
+        return 'normalization'
+    def __call__(self, image, label, params=None):
+        if params is None:
+            params = self._random()
+        self.params = params
+        # convert back to numpy and normalize to [0,1]
+        image = image.astype(np.float32)
+        image = (image - np.mean(image)) / np.std(image) * self.params['std'] + self.params['mean']
+        if self.params['n_label']:
+            label =  (label - np.mean(label)) / np.std(label)
+            label = label.astype(np.float32)
+        else:
+            label = label.astype(np.uint8)
+        return image, label   
+    def _random(self):
+        params = self.rdparams
+        return params
+
+class _affine_worker(Worker):
+    def __init__(self,rdparams={}):
+        super(_affine_worker,self).__init__(rdparams)
+        default_rdparams = {'p':0.5,  'angle':[-30,30], 'label_mode':'nearest',
+                            'translate':[-10,10,-10,10],
+                            'scale':[0.8,1.2],'shear':[0,0,0,0]}
+        default_rdparams.update(rdparams)
+        self.rdparams = default_rdparams
+    def name(self):
+        return 'affine'
+    def __call__(self, image, label, params=None):
+        ''' Affine transformation on image and label
+        Args:
+        image: np array or PIL, [img_rows, img_cols] 
+        label: np array or PIL, [img_rows, img_cols]
+        '''
+        if params is None:
+            params = self._random()
+        self.params = params
+        if self.params['p']:
+            image = Affine(rotate_params=self.params['angle'], translate_params=self.params['translate'], 
+                           scale_params=self.params['scale'], shear_params=self.params['shear'], mode='bilinear', 
+                           padding_mode='zeros')(image)
+            label = Affine(rotate_params=self.params['angle'], translate_params=self.params['translate'], 
+                           scale_params=self.params['scale'], shear_params=self.params['shear'], 
+                           mode=self.params['label_mode'], padding_mode='zeros')(label)
+        return image, label      
+    def _random(self):
+        params = {}
+        params['p'] = random.random() < self.rdparams['p']
+        params['label_mode'] = self.rdparams['label_mode']
+        params['angle'] = random.randint(self.rdparams['angle'][0],self.rdparams['angle'][1])
+        params['translate'] = [random.randint(self.rdparams['translate'][0],self.rdparams['translate'][1]),
+                               random.randint(self.rdparams['translate'][2],self.rdparams['translate'][3])]
+        params['scale'] = random.random()*(self.rdparams['scale'][1]-self.rdparams['scale'][0]) \
+                          + self.rdparams['scale'][0]                               
+        params['shear'] = [random.randint(self.rdparams['shear'][0],self.rdparams['shear'][1]),
+                           random.randint(self.rdparams['shear'][2],self.rdparams['shear'][3])]
+        return params
+
+class _hflip_worker(Worker):
+    def __init__(self,rdparams={}):
+        super(_hflip_worker,self).__init__(rdparams)
+        default_rdparams = {'p':0.5}
+        default_rdparams.update(rdparams)
+        self.rdparams = default_rdparams
+    def name(self):
+        return 'hflip'
+    def __call__(self, image, label, params=None):
+        if params is None:
+            params = self._random()
+        self.params = params
+        if self.params['p']:
+            image = image[:,:,::-1]
+            label = label[:,:,::-1]
+        return image, label   
+    def _random(self):
+        params = {}
+        params['p'] = random.random() < self.rdparams['p']
+        return params
+
+class _gamma_worker(Worker):
+    def __init__(self,rdparams={}):
+        super(_gamma_worker,self).__init__(rdparams)
+        default_rdparams = {'p':0.5, 'gamma':[0.7,1.5], 'gain':1}
+        default_rdparams.update(rdparams)
+        self.rdparams = default_rdparams
+    def name(self):
+        return 'gamma'
+    def __call__(self, image, label, params=None):
+        if params is None:
+            params = self._random()
+        self.params = params
+        if self.params['p']:
+            image = AdjustContrast(self.params['gamma'])(image)
+        return image, label   
+    def _random(self):
+        params = {}
+        params['p'] = random.random() < self.rdparams['p']
+        params['gamma'] = random.random()*(self.rdparams['gamma'][1]-self.rdparams['gamma'][0]) \
+                          + self.rdparams['gamma'][0]         
+        return params
+
+class _noise_worker(Worker):
+    def __init__(self,rdparams={}):
+        super(_noise_worker,self).__init__(rdparams)
+        default_rdparams = {'p':0.5, 'type':'gaussian', 'std':0.1}
+        default_rdparams.update(rdparams)
+        self.rdparams = default_rdparams
+    def name(self):
+        return 'noise'
+    def __call__(self, image, label, params=None):
+        if params is None:
+            params = self._random()
+        self.params = params
+        if self.params['p']:
+            if self.params['type'] == 'gaussian':
+                image = image + self.params['std']*np.random.randn(image.shape[0], image.shape[1], image.shape[2]).astype(np.float32)
             else:
-                if np.random.random() < 0.5:
-                    # make sure the retina is inside the scale
-                    top = np.nanmin(bds[0,:])
-                    bot = h
-                    if self.crop is None:
-                        self.crop = [h,w]
-                    margin = 3                
-                    self.scales[1]= max(min((self.crop[0] - 2*margin)/(bot - top) * h,
-                                             self.scales[1]), self.scales[0]) 
-                    h_n = np.random.randint(self.scales[0], int(self.scales[1]) + 1)
-                    scale = h_n/h
-                    data = cv2.resize(data, (w, h_n), interpolation=cv2.INTER_CUBIC)
-                    mask = cv2.resize(mask, (w,h_n), interpolation=cv2.INTER_NEAREST)
-                    bds = bds*scale
+                raise NotImplementedError 
+        return image, label   
+    def _random(self):
+        params = {}
+        params['p'] = random.random() < self.rdparams['p']   
+        params['std'] = self.rdparams['std']
+        params['type'] = self.rdparams['type']
+        return params
 
-        # crop the image to the original size or to the crop size
-        if self.crop:
-            if self.scales and self.scales[-1] == 1:
-                clims_w = w//2 
-            else:
-                b_sum = bds[0]            
-                clims_left = np.argmax(~np.isnan(b_sum)) + self.crop[1]//2
-                clims_right = w - np.argmax(~np.isnan(b_sum[::-1])) - self.crop[1]//2
-                # make sure the crop center is not on a nan boundary
-                # due to the nan value of DME manual delineation
-                idx = np.arange(len(b_sum))
-                idx = np.logical_and(idx>=clims_left, idx<=clims_right)
-                idx = np.logical_and(idx,~np.isnan(b_sum))
-                idx = np.where(idx>0)[0]
-                clims_w =  np.random.choice(idx)
-            clims_h = h_n - self.crop[0]//2
-            data, bds, mask = crop([data, bds, mask],[clims_h,clims_w],self.crop)
-        bds[bds<0] = 0
-        bds[bds>data.shape[0]-1] = data.shape[0] -1            
-        sample['data'], sample['bds'], sample['mask'] = data, bds, mask
-        if self.valcrop:
-            # Crop the input image to a smaller size for less memory usage
-            # Need to make sure the valcrop paramsters will fit for the retina
-            #clims_w = (clims_left + clims_right)//2
-            #clims_w = idx[np.argmin(abs(clims_w - idx))]
-            #clims_h = (bds[0,clims_w] + bds[-1,clims_w])//2
-            clims_h = h//2 - self.valcrop[0]//2 
-            clims_w = w//2 - self.valcrop[1]//2
-            sample['nocrop'] = {'data': data,'bds':bds,'mask':mask}
-            data = data[clims_h:clims_h+self.valcrop[0], clims_w:clims_w+self.valcrop[1]]
-            mask = mask[clims_h:clims_h+self.valcrop[0], clims_w:clims_w+self.valcrop[1]]
-            bds = bds[:,clims_w:clims_w+self.valcrop[1]] - clims_w
-            #data, bds, mask = crop([data, bds, mask],[clims_h,clims_w],self.valcrop)
-            sample['data'], sample['bds'], sample['mask'] = data, bds, mask
+class _padcrop_worker(Worker):
+    def __init__(self,rdparams={}):
+        super(_padcrop_worker,self).__init__(rdparams)
+        default_rdparams = {'width':400, 'height':400}
+        default_rdparams.update(rdparams)
+        self.rdparams = default_rdparams
+    def name(self):
+        return 'padcrop'
+    def __call__(self, image, label, params=None):
+        if params is None:
+            params = self._random()
+        self.params = params
+        if self.params['width'] > 0 and self.params['height'] > 0:
+            image = ResizeWithPadOrCrop([self.params['width'], self.params['height']])(image)
+            label = ResizeWithPadOrCrop([self.params['width'], self.params['height']])(label)
+        return image, label   
+    def _random(self):
+        params = {}
+        params = self.rdparams
+        return params
+ 
 
-        return sample
-class OCTNormalizer():
-    ''' Normalize the input 2D B-scan with zero-mean unit variance'''
-    def __init__(self,paras=[0,1], vol=False):
-        self.paras = paras
-        self.vol = vol
-
-    def __call__(self,sample):
-        if self.vol:
-            # [B,1,H,W]
-            data = sample
-            if len(self.paras)>0:
-                data = data - np.mean(data,(-1,-2),keepdims=True) \
-                        + self.paras[0]
-            if len(self.paras)>1:
-                data = data/np.std(data,(-1,-2),keepdims=True)*self.paras[1]            
-            return data
-        data = sample['data']
-        # mask out bright artifacts
-        mask_data = data[data<0.99]
-        if len(self.paras)>0:
-            data = data - np.mean(mask_data) + self.paras[0]
-        if len(self.paras)>1:
-            data = data/np.std(mask_data)*self.paras[1]
-        sample['data'] =data
-        return sample
-
-
-def crop(sample,center,sizes):
-    """
-    Args: 
-    data [img_rows, img_cols]
-    bds [bdc, img_cols]
-    mask [img_rows, img_cols]
-    sizes: crop patch size
-    center: patch center
-    """
-    data,bds,mask = sample
-    s = sizes
-    r,c = center
-    img_rows,img_cols = data.shape
-    imgc = np.zeros(s)
-    maskc = np.zeros(s)*np.nan
-    bdsc = np.zeros((bds.shape[0],s[1]))*np.nan
-    # build row index corespondence between patch and image
-    rr_idx = (np.arange(s[0])).astype(int)
-    r_idx = (rr_idx -s[0]//2 + r).astype(int)
-    r_mask = (r_idx>=0) & (r_idx< img_rows)
-    # build col index corespondence between patch and image
-    cc_idx = (np.arange(s[1])).astype(int)
-    c_idx = (cc_idx -s[1]//2 + c)
-    c_mask = (c_idx>=0) & (c_idx< img_cols)
-
-    X,Y = np.meshgrid(r_idx[r_mask],c_idx[c_mask])
-    XX,YY = np.meshgrid(rr_idx[r_mask],cc_idx[c_mask])
-
-    imgc[XX.flatten(),YY.flatten()] = data[X.flatten(),Y.flatten()]
-    maskc[XX.flatten(),YY.flatten()] = mask[X.flatten(),Y.flatten()]
-    bdsc[:,cc_idx[c_mask]] = bds[:,c_idx[c_mask]] - int(r) + s[0]//2
-    return [imgc,bdsc,maskc]
-
-
-
-
-
-        
-        
-
-
+registered_workers = \
+{
+    'affine':_affine_worker,
+    'hflip':_hflip_worker,
+    'normalize':_normalize_worker,
+    'gamma':_gamma_worker,
+    'noise':_noise_worker,
+    'padcrop':_padcrop_worker
+}
